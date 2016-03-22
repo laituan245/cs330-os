@@ -6,8 +6,11 @@
 #include "threads/interrupt.h"
 #include "threads/io.h"
 #include "threads/synch.h"
+#include <list.h>
 #include "threads/thread.h"
-  
+
+
+static struct list waiting_list;
 /* See [8254] for hardware details of the 8254 timer chip. */
 
 #if TIMER_FREQ < 19
@@ -35,6 +38,7 @@ static void real_time_sleep (int64_t num, int32_t denom);
 void
 timer_init (void) 
 {
+  list_init(&waiting_list);
   /* 8254 input frequency divided by TIMER_FREQ, rounded to
      nearest. */
   uint16_t count = (1193180 + TIMER_FREQ / 2) / TIMER_FREQ;
@@ -99,8 +103,16 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  enum intr_level old_level = intr_disable ();
+
+  struct thread *t = thread_current();
+  list_push_back(&waiting_list, &(t->waiting_elem));
+  t->time_sleep = start + ticks;
+  sema_init(&(t->sema_sleep), 0);
+  intr_set_level(old_level);
+
+  sema_down(&t->sema_sleep);
+
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -135,8 +147,23 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  enum intr_level old_level = intr_disable ();
+  //printf("timer_interrupt");
   ticks++;
+  struct list_elem *e;
+
+  for (e = list_begin (&waiting_list); e != list_end (&waiting_list); e = list_next (e))
+          {
+            struct thread *t = list_entry (e, struct thread, waiting_elem);
+            //printf("tid zzzzz = %d\n", t->tid); 
+            if(t->time_sleep <= ticks) {
+              sema_up(&t->sema_sleep);  
+              list_remove(&(t->waiting_elem));
+            }
+          }
+  //ticks++;
   thread_tick ();
+  intr_set_level(old_level);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

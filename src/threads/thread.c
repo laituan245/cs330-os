@@ -103,6 +103,7 @@ thread_init (void)
   initial_thread->tid = allocate_tid ();
 }
 
+
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
 void
@@ -469,8 +470,29 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  else{
+    struct list_elem *e;
+    int max=-1;
+    struct thread *max_priority;
+    for (e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next (e)){
+      struct thread *t = list_entry(e, struct thread, elem);
+      // printf("priority=>>>>>>>>>>>>>> %d \n", t->tid);
+      if(t->priority>max){
+        max=t->priority;
+        max_priority = t;
+      }
+    }
+    //safe until here
+    if(max==-1){
+      return idle_thread;
+    }else{
+      list_remove(&max_priority->elem);
+      return max_priority;
+    }
+    // return list_entry (list_pop_front (&ready_list), struct thread, elem);
+
+  }
+    // return list_entry (list_pop_front (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
