@@ -3,10 +3,14 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
+#include <list.h>
 #include "threads/interrupt.h"
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+
+/* List of sleeping processes */
+static struct list sleeping_list;
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -35,6 +39,7 @@ static void real_time_sleep (int64_t num, int32_t denom);
 void
 timer_init (void) 
 {
+  list_init(&sleeping_list);
   /* 8254 input frequency divided by TIMER_FREQ, rounded to
      nearest. */
   uint16_t count = (1193180 + TIMER_FREQ / 2) / TIMER_FREQ;
@@ -99,8 +104,13 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  intr_disable();
+  struct thread * t = thread_current();
+  t->wakeup_time = start + ticks;
+  list_push_back(&sleeping_list, &t->sleeping_elem);
+  sema_init(&t->sleeping_sema, 0);
+  intr_enable();
+  sema_down(&t->sleeping_sema);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -135,8 +145,18 @@ timer_print_stats (void)
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  enum intr_level old_level = intr_disable();
   ticks++;
-  thread_tick ();
+  struct list_elem *e;
+  for (e = list_begin (&sleeping_list); e != list_end (&sleeping_list); e = list_next (e)) {
+    struct thread *t = list_entry (e, struct thread, sleeping_elem);
+    if (t->wakeup_time <=  ticks) {
+      sema_up(&t->sleeping_sema); 
+      list_remove(&t->sleeping_elem);
+    } 
+  }
+  thread_tick();
+  intr_set_level(old_level);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
