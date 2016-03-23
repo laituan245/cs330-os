@@ -88,6 +88,9 @@ static tid_t allocate_tid (void);
 
 /* This is 2016 spring cs330 skeleton code */
 
+static struct list waiting_list;
+
+
 void
 thread_init (void) 
 {
@@ -95,7 +98,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
-
+  // list_init(&waiting_list);
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -202,11 +205,10 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
 
   /* Add to run queue. */
-  if(priority>thread_current()->priority){
-    thread_yield();
-
-  }
   thread_unblock (t);
+  //if new added thread has higher priority, yield
+  if (priority > thread_get_priority())
+    thread_yield();
 
   return tid;
 }
@@ -319,19 +321,41 @@ thread_yield (void)
   intr_set_level (old_level);
 }
 
+/* Get the thread with the maximum priority in the run queue */
+static struct thread *
+get_max_priority_thread (void) {
+  ASSERT(intr_get_level() == INTR_OFF);
+  if (list_empty(&ready_list))
+    return NULL;
+  else {
+    struct list_elem *e;
+    struct thread *max_priority_thread = NULL;
+    for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) {
+      struct thread *tmp_thread = list_entry(e, struct thread, elem);
+      if ((max_priority_thread == NULL) || (tmp_thread->priority > max_priority_thread->priority))
+        max_priority_thread = tmp_thread;
+    }
+    return max_priority_thread;
+  }
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) 
 {
+
+  bool should_yield = false;
+
+  enum intr_level old_level = intr_disable();
   thread_current ()->priority = new_priority;
-  struct list_elem *e;
-  for (e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next (e)){
-    struct thread *t = list_entry(e, struct thread, elem);
-    if(t->priority>new_priority){
-      thread_yield();
-      break;
-    }
-  }
+  
+  struct thread * max_priority_thread = get_max_priority_thread();
+  if ((max_priority_thread != NULL) && (max_priority_thread->priority > thread_get_priority()))
+    should_yield = true; 
+  intr_set_level(old_level);
+  if (should_yield)
+    thread_yield();
+
 }
 
 /* Returns the current thread's priority. */
@@ -457,6 +481,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  list_init(&t->acquired_locks);
+  list_init(&t->waiting_locks);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -485,7 +512,7 @@ next_thread_to_run (void)
   else{
     struct list_elem *e;
     int max=-1;
-    struct thread *max_priority;
+    struct thread *max_priority = idle_thread;
     for (e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next (e)){
       struct thread *t = list_entry(e, struct thread, elem);
       if(t->priority>max){

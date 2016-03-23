@@ -197,8 +197,32 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  sema_down (&lock->semaphore);
+  struct thread * holder = lock->holder;
+  enum intr_level old_level = intr_disable();
+  if(holder!=NULL){  // the lock is currently held by another thread
+    if(holder->priority < thread_get_priority()){
+      holder->priority = thread_get_priority();
+    }
+  }
+  // remove the lock from waiting_locks list
+  // struct list_elem *e;
+  // for (e = list_begin (&thread_current()->waiting_locks); e != list_end (&thread_current()->waiting_locks);
+  //      e = list_next (e))
+  //   {
+  //     if(e==lock){
+  //       list_remove(e);
+  //     }
+  //   }
+  // sema_down (&lock->semaphore);
+  // lock->holder = thread_current ();
+  // list_push_back(&thread_current()->acquired_locks, &lock); 
+  // Tuan's code
+  list_push_back(&thread_current()->waiting_locks, &lock->waiting_elem);
+  sema_down (&lock->semaphore); 
   lock->holder = thread_current ();
+  list_push_back(&thread_current()->acquired_locks, &lock->acquired_elem);
+  list_remove(&lock->waiting_elem);
+  intr_set_level(old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -216,8 +240,15 @@ lock_try_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   success = sema_try_down (&lock->semaphore);
-  if (success)
+  if (success){
     lock->holder = thread_current ();
+    list_push_back(&thread_current()->acquired_locks, &lock->acquired_elem);
+  }
+    
+  else{
+    list_push_back(&thread_current()->waiting_locks, &lock->waiting_elem);
+
+  }
   return success;
 }
 
