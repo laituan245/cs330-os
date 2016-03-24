@@ -89,10 +89,14 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int assigned_priority;
 
     struct list_elem sleeping_elem;
     struct semaphore sleeping_sema;
     int64_t wakeup_time;
+
+    struct lock *waiting_lock;
+    struct list acquired_locks;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -137,5 +141,8 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+int get_max_donated_priority();
+
 
 #endif /* threads/thread.h */
