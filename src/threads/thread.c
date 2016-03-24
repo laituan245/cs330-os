@@ -241,14 +241,20 @@ void
 thread_unblock (struct thread *t) 
 {
   enum intr_level old_level;
-
+  bool should_yield = false;
   ASSERT (is_thread (t));
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
+  if(t->priority > thread_current()->priority){
+    should_yield = true;
+  }  
   intr_set_level (old_level);
+  if (should_yield)
+    thread_yield();
+  
 }
 
 /* Returns the name of the running thread. */
@@ -348,7 +354,7 @@ thread_set_priority (int new_priority)
 
   enum intr_level old_level = intr_disable();
   thread_current ()->priority = new_priority;
-  
+  thread_current()->assigned_priority = new_priority;
   struct thread * max_priority_thread = get_max_priority_thread();
   if ((max_priority_thread != NULL) && (max_priority_thread->priority > thread_get_priority()))
     should_yield = true; 
@@ -362,6 +368,7 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void) 
 {
+
   return thread_current ()->priority;
 }
 
@@ -480,10 +487,11 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->assigned_priority = priority;
   t->magic = THREAD_MAGIC;
 
   list_init(&t->acquired_locks);
-  list_init(&t->waiting_locks);
+  t->waiting_lock = NULL;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -520,13 +528,9 @@ next_thread_to_run (void)
         max_priority = t;
       }
     }
-    if(max==-1){
-      return idle_thread;
-    }else{
-      list_remove(&max_priority->elem);
-      return max_priority;
-    }
-
+    
+    list_remove(&max_priority->elem);
+    return max_priority;
   }
 }
 

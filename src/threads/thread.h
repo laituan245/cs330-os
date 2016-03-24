@@ -88,7 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int assigned_priority;
+    int assigned_priority;              //priority assigned at creation
     int64_t time_sleep;
     struct semaphore sema_sleep;
     /* Shared between thread.c and synch.c. */
@@ -96,7 +96,7 @@ struct thread
     struct list_elem waiting_elem;
 
     struct list acquired_locks;
-    struct list waiting_locks;
+    struct lock *waiting_lock;
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
