@@ -97,6 +97,18 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+/* The function returns true if a sleeping thread A has smaller wakeup_time than another sleeping thread B
+ * It returns false, otherwise. */
+static bool
+wakeup_time_less (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) 
+{
+  const struct thread *a = list_entry (a_, struct thread, sleeping_elem);
+  const struct thread *b = list_entry (b_, struct thread, sleeping_elem);
+  
+  return a->wakeup_time < b->wakeup_time;
+}
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) 
@@ -104,11 +116,11 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  intr_disable();
   struct thread * t = thread_current();
   t->wakeup_time = start + ticks;
-  list_push_back(&sleeping_list, &t->sleeping_elem);
   sema_init(&t->sleeping_sema, 0);
+  intr_disable();
+  list_insert_ordered(&sleeping_list, &t->sleeping_elem, wakeup_time_less , NULL);
   intr_enable();
   sema_down(&t->sleeping_sema);
 }
@@ -153,7 +165,9 @@ timer_interrupt (struct intr_frame *args UNUSED)
     if (t->wakeup_time <=  ticks) {
       sema_up(&t->sleeping_sema); 
       list_remove(&t->sleeping_elem);
-    } 
+    }
+    else
+      break; 
   }
   thread_tick();
   intr_set_level(old_level);
