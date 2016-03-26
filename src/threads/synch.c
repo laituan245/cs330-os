@@ -364,7 +364,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
-
+  
+  enum intr_level old_level;
+  bool should_yield = false;
+  
+  old_level = intr_disable();
   if (!list_empty (&cond->waiters)) {
     struct list_elem *e;
     struct semaphore_elem * bst_semaphore_elem = NULL;
@@ -381,7 +385,13 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
     }
     list_remove(&(bst_semaphore_elem->elem));
     sema_up(&(bst_semaphore_elem->semaphore));
+    struct thread *t = list_entry(list_begin(&(bst_semaphore_elem->semaphore).waiters), struct thread, elem);
+    if (t->priority > thread_current()->priority)
+      should_yield = true;
   }
+  intr_set_level (old_level);
+  if (should_yield && !intr_context())
+    thread_yield();
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
