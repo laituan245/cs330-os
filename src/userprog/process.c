@@ -26,31 +26,30 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *argv) 
 {
-  char *fn_copy;
+  char *argv_copy;
   tid_t tid;
-
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  
+  argv_copy = palloc_get_page (0);
+  if (argv_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (argv_copy, argv, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (argv, PRI_DEFAULT, start_process, argv_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (argv_copy); 
   return tid;
 }
 
 /* A thread function that loads a user process and makes it start
    running. */
 static void
-start_process (void *f_name)
+start_process (void *argv)
 {
-  char *file_name = f_name;
+  int argc, i;
+  char *save_ptr, *token;
+  char *file_name = strtok_r(argv, " ", &save_ptr);
   struct intr_frame if_;
   bool success;
 
@@ -62,10 +61,35 @@ start_process (void *f_name)
   success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  if (!success) {
+    palloc_free_page(argv);
     thread_exit ();
+  }
 
+  /* Put the arguments on the stack */
+  if_.esp -= (strlen(file_name)+1);
+  strlcpy (if_.esp, file_name ,strlen(file_name) + 1);
+  argc = 1;
+  for (token = strtok_r (NULL, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
+    if_.esp -= (strlen(token) + 1);
+    strlcpy (if_.esp, token ,strlen(token) + 1);
+    argc ++;
+  }
+  char * tmp_ptr = if_.esp;
+  if_.esp -= (((uintptr_t) if_.esp) % 4);
+  if_.esp -= 4;
+  for (i = 0; i < argc; i++) {
+   * (--(char **) if_.esp) = tmp_ptr;
+   tmp_ptr += (strlen(tmp_ptr) + 1);
+  }
+  char ** tmp_ptr2 = if_.esp;
+  * (--(char **) if_.esp) = tmp_ptr2;
+  * (--(int *) if_.esp) = argc;
+  if_.esp -= 4;
+  hex_dump(if_.esp, if_.esp, 52, true);
+  printf("<1>%p\n", if_.esp);
+  printf("<2>%d\n", is_user_vaddr(if_.esp)); 
+  palloc_free_page(argv);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
