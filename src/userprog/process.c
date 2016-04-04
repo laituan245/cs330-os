@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <list.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -15,11 +16,33 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
+
+struct exit_info {
+  tid_t tid;
+  int status;
+  struct list_elem elem;
+};
+
+struct relationship_info {
+  tid_t parent_tid;
+  tid_t child_tid;
+  struct list_elem elem;
+};
+
+static struct list exit_info_list;
+static struct list relationship_list;
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+void process_init() {
+  list_init(&exit_info_list);
+  list_init(&relationship_list);
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -36,9 +59,18 @@ process_execute (const char *argv)
     return TID_ERROR;
   strlcpy (argv_copy, argv, PGSIZE);
 
-  tid = thread_create (argv, PRI_DEFAULT, start_process, argv_copy);
+  char *save_ptr;
+  char *file_name = strtok_r(argv, " ", &save_ptr);
+
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, argv_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (argv_copy); 
+    palloc_free_page (argv_copy);
+  else {
+   struct relationship_info * new_info = malloc(12);
+   new_info->parent_tid = thread_current()->tid;
+   new_info->child_tid = tid;
+   list_push_back(&relationship_list, &new_info->elem);
+  }
   return tid;
 }
 
@@ -86,10 +118,11 @@ start_process (void *argv)
   * (--(char **) if_.esp) = tmp_ptr2;
   * (--(int *) if_.esp) = argc;
   if_.esp -= 4;
-  hex_dump(if_.esp, if_.esp, 52, true);
-  printf("<1>%p\n", if_.esp);
-  printf("<2>%d\n", is_user_vaddr(if_.esp)); 
+  //hex_dump(if_.esp, if_.esp, 52, true);
+  //printf("<1>%p\n", if_.esp);
+  //printf("<2>%d\n", is_user_vaddr(if_.esp)); 
   palloc_free_page(argv);
+  
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -114,7 +147,34 @@ start_process (void *argv)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  struct list_elem * e;
+  struct relationship_info * rls_info;
+  struct thread * curr = thread_current();
+  bool found = false;
+  if (!list_empty(&relationship_list)) {
+    for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e = list_next(e)) { 
+      rls_info = list_entry(e, struct relationship_info, elem);
+      if (rls_info->child_tid == child_tid && rls_info->parent_tid == thread_current()->tid) { 
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found)
+    return -1;
+  
+  while (true) {
+    if (!list_empty(&exit_info_list)) {
+      for (e = list_begin(&exit_info_list); e != list_end(&exit_info_list); e = list_next(e)) {
+        struct exit_info * info = list_entry(e, struct exit_info, elem);
+        if (info->tid == child_tid) {
+          list_remove(&info->elem);
+          list_remove(&rls_info->elem);
+          return info->status;
+        }
+      } 
+    }
+  }
 }
 
 /* Free the current process's resources. */
@@ -140,6 +200,11 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  
+  struct exit_info * new_info = malloc(12);
+  new_info->status = curr->exit_status;
+  new_info->tid = curr->tid;
+  list_push_back(&exit_info_list, &new_info->elem);
 }
 
 /* Sets up the CPU for running user code in the current
