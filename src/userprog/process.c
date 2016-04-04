@@ -33,6 +33,12 @@ struct relationship_info {
   struct list_elem elem;
 };
 
+struct pack {
+  char * argv;
+  struct semaphore * sema;
+  bool * loaded;
+};
+
 static struct list exit_info_list;
 static struct list relationship_list;
 
@@ -51,6 +57,9 @@ void process_init() {
 tid_t
 process_execute (const char *argv) 
 {
+  struct pack my_pack;
+  struct semaphore child_load_sema;
+  bool loaded = false;
   char *argv_copy;
   tid_t tid;
   
@@ -61,15 +70,24 @@ process_execute (const char *argv)
 
   char *save_ptr;
   char *file_name = strtok_r(argv, " ", &save_ptr);
-
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, argv_copy);
+  
+  sema_init(&child_load_sema, 0);
+  my_pack.sema = &child_load_sema;
+  my_pack.argv = argv_copy;
+  my_pack.loaded = &loaded;
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, &my_pack);
   if (tid == TID_ERROR)
     palloc_free_page (argv_copy);
   else {
-   struct relationship_info * new_info = malloc(12);
-   new_info->parent_tid = thread_current()->tid;
-   new_info->child_tid = tid;
-   list_push_back(&relationship_list, &new_info->elem);
+   sema_down(&child_load_sema);
+   if (!loaded)
+     return -1;
+   else {
+     struct relationship_info * new_info = malloc(12);
+     new_info->parent_tid = thread_current()->tid;
+     new_info->child_tid = tid;
+     list_push_back(&relationship_list, &new_info->elem);
+   }
   }
   return tid;
 }
@@ -77,8 +95,13 @@ process_execute (const char *argv)
 /* A thread function that loads a user process and makes it start
    running. */
 static void
-start_process (void *argv)
+start_process (void * aux)
 {
+  struct pack * my_pack = (struct pack *) aux;
+  void * argv = my_pack->argv;
+  struct semaphore * sema = my_pack->sema;
+  bool * loaded = my_pack->loaded;
+
   int argc, i;
   char *save_ptr, *token;
   char *file_name = strtok_r(argv, " ", &save_ptr);
@@ -95,6 +118,7 @@ start_process (void *argv)
   /* If load failed, quit. */
   if (!success) {
     palloc_free_page(argv);
+    sema_up(sema);
     thread_exit ();
   }
 
@@ -118,11 +142,11 @@ start_process (void *argv)
   * (--(char **) if_.esp) = tmp_ptr2;
   * (--(int *) if_.esp) = argc;
   if_.esp -= 4;
-  //hex_dump(if_.esp, if_.esp, 52, true);
-  //printf("<1>%p\n", if_.esp);
-  //printf("<2>%d\n", is_user_vaddr(if_.esp)); 
+ 
   palloc_free_page(argv);
-  
+
+  sema_up(sema);
+  *loaded = true;
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
