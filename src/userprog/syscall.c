@@ -20,7 +20,7 @@ struct file_info {
 
 struct lock fd_lock;
 
-struct list file_info_list;
+static struct list file_info_list;
 
 struct semaphore filesys_sema;
 
@@ -54,13 +54,25 @@ void terminate_process() {
   printf("%s: exit(%d)\n", thread_current()->name, -1);
   sema_down(&filesys_sema);
   struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-   struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-   if (tmp_info->tid == thread_current()->tid) {
-      list_remove(&tmp_info->elem);
-      file_close(tmp_info->file_ptr);
-   }
+  struct file_info * tmp_info;
+  bool freedsth;
+  while(true) {
+    freedsth = false;
+    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+      tmp_info = list_entry(e, struct file_info, elem);
+      if (tmp_info->tid == thread_current()->tid) {
+        list_remove(&tmp_info->elem);
+        file_close(tmp_info->file_ptr);   
+        tmp_info->file_ptr = NULL;
+        free(tmp_info);
+        freedsth = true;
+        break;
+     }
+    }
+    if (!freedsth)
+      break;
   }
+ 
   sema_up(&filesys_sema);
   thread_exit();
 }
@@ -276,8 +288,29 @@ void exit (void * esp) {
   int status = * (int *) (esp + 4);
   thread_current()->exit_status = status;
   printf("%s: exit(%d)\n", thread_current()->name, status);
-  
+  sema_down(&filesys_sema);  
   struct list_elem * e;
+  struct file_info * tmp_info;
+  bool freedsth;
+  while(true) {
+    freedsth = false;
+    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+      tmp_info = list_entry(e, struct file_info, elem);
+      if (tmp_info->tid == thread_current()->tid) {
+        list_remove(&tmp_info->elem);
+        file_close(tmp_info->file_ptr);
+        tmp_info->file_ptr = NULL;
+        free(tmp_info);
+        freedsth = true;
+        break;
+     }
+    }
+    if (!freedsth)
+      break;
+  }
+
+  sema_up(&filesys_sema);
+
   thread_exit();
 }
 
@@ -359,12 +392,18 @@ int open(void * esp) {
 
   sema_down(&filesys_sema);
   struct file * file_ptr = filesys_open (file_copy);
-  if (file_ptr == NULL)
+  if (file_ptr == NULL) {
+    sema_up(&filesys_sema);
     return -1;
+  }
   int new_fd = allocate_fd();
-  struct file_info *  new_info = malloc(20);
-  if (new_info == NULL)
+  struct file_info tmp_info;
+  struct file_info *  new_info = malloc(sizeof (tmp_info));
+  if (new_info == NULL) {
+    file_close(file_ptr);
+    sema_up(&filesys_sema);
     return -1;
+  }
   new_info->fd = new_fd;
   new_info->file_ptr = file_ptr;
   new_info->tid = thread_current()->tid;
