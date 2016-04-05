@@ -7,11 +7,13 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "filesys/filesys.h"
 #include "list.h"
 
 struct file_info {
   int fd;
+  tid_t tid;
   struct file * file_ptr;
   struct list_elem elem;
 };
@@ -91,7 +93,70 @@ int write (void * esp) {
     putbuf(buffer, size);
     return size;
   }
+  else  {
+    sema_down(&filesys_sema);
+    struct file * myfile = NULL;
+    struct list_elem * e;
+    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+        myfile = tmp_info -> file_ptr;
+          break;
+      }
+     }
+     if (myfile == NULL) {
+       sema_up(&filesys_sema);
+       return -1;
+     }
+     void * tmp_buffer = malloc(size);
+     memcpy(tmp_buffer, buffer,size);
+     int result = file_write (myfile, tmp_buffer, size);
+     sema_up(&filesys_sema);
+     return result;
+  }
 }
+
+int read (void * esp) {
+  int argc = 3;
+
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd = * (int *) (esp + 4);
+  void * buffer = * (void **) (esp + 8);
+  unsigned size = * (unsigned *) (esp + 12);
+
+  if (!is_valid(buffer) || !is_valid(buffer + size))
+    terminate_process();
+
+  if (fd == 0) {
+    return 0;
+  }
+  else {
+    sema_down(&filesys_sema);
+    struct file * myfile = NULL;
+    struct list_elem * e;
+    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+      //printf("fd = %d. tmp_info->fd = %d\n", fd, tmp_info->fd);
+      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) { 
+        myfile = tmp_info -> file_ptr;
+        break;
+      } 
+    }
+    if (myfile == NULL) {
+      sema_up(&filesys_sema);
+      return -1;
+    }
+    void * tmp_buffer = malloc(size);
+    int result = file_read (myfile, tmp_buffer, size);
+    //printf("result = %d. size = %d\n", result, size);
+    sema_up(&filesys_sema);
+    memcpy(buffer, tmp_buffer,size);
+    return result;
+  }
+}
+
 
 tid_t exec(void * esp) {
   int argc = 1;
@@ -111,6 +176,38 @@ tid_t exec(void * esp) {
 
   tid_t result = process_execute(argv_copy);
   palloc_free_page(argv_copy);
+  return result;
+}
+
+int filesize (void * esp) {
+  int argc = 1;
+
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd = * (int *) (esp + 4);
+  sema_down(&filesys_sema);
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    //printf("HERE\n");
+    //printf("fd = %d. tmp_info->fd = %d\n", fd, tmp_info->fd);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+    //printf("<1>\n");
+  }
+  if (myfile == NULL) {
+    sema_up(&filesys_sema);
+    return -1;
+  }
+  //printf("BEFORE\n");
+  int result = file_length(myfile);
+  //printf("AFTER\n");
+  sema_up(&filesys_sema);
   return result;
 }
 
@@ -206,10 +303,11 @@ int open(void * esp) {
   if (file_ptr == NULL)
     return -1;
   int new_fd = allocate_fd();
-  struct file_info new_info;
-  new_info.fd = new_fd;
-  new_info.file_ptr = file_ptr;
-  list_push_back(&file_info_list, &new_info.elem);  
+  struct file_info *  new_info = palloc_get_page (PAL_ZERO);
+  new_info->fd = new_fd;
+  new_info->file_ptr = file_ptr;
+  new_info->tid = thread_current()->tid;
+  list_push_back(&file_info_list, &new_info->elem);  
   sema_up(&filesys_sema);
 
   palloc_free_page(file_copy);
@@ -248,8 +346,10 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = open(f->esp);
       break;
     case SYS_FILESIZE:               /* Obtain a file's size. */
+      f->eax = filesize(f->esp);
       break;
     case SYS_READ:                   /* Read from a file. */
+      f->eax = read(f->esp);
       break;
     case SYS_WRITE:                  /* Write to a file. */
       f->eax = write(f->esp);

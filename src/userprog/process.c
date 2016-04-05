@@ -83,6 +83,7 @@ process_execute (const char *argv)
    if (!loaded)
      return -1;
    else {
+     //printf("parent_tid = %d. child_tid = %d\n", thread_current()->tid, tid);
      struct relationship_info * new_info = malloc(12);
      new_info->parent_tid = thread_current()->tid;
      new_info->child_tid = tid;
