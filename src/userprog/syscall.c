@@ -89,7 +89,9 @@ int write (void * esp) {
   if (!is_valid(buffer) || !is_valid(buffer + size))
     terminate_process();
 
-  if (fd == 1) {
+  if (fd == 0)
+    return 0;
+  else if (fd == 1) {
     putbuf(buffer, size);
     return size;
   }
@@ -101,18 +103,19 @@ int write (void * esp) {
       struct file_info * tmp_info = list_entry(e, struct file_info, elem);
       if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
         myfile = tmp_info -> file_ptr;
-          break;
+        break;
       }
-     }
-     if (myfile == NULL) {
-       sema_up(&filesys_sema);
-       return -1;
-     }
-     void * tmp_buffer = malloc(size);
-     memcpy(tmp_buffer, buffer,size);
-     int result = file_write (myfile, tmp_buffer, size);
-     sema_up(&filesys_sema);
-     return result;
+    }
+    if (myfile == NULL) {
+      sema_up(&filesys_sema);
+      return 0;
+    }
+    
+    void * tmp_buffer = malloc(size);
+    memcpy(tmp_buffer, buffer,size);
+    int result = file_write (myfile, tmp_buffer, size);
+    sema_up(&filesys_sema);
+    return result;
   }
 }
 
@@ -132,13 +135,14 @@ int read (void * esp) {
   if (fd == 0) {
     return 0;
   }
+  else if (fd == 1)
+    return 0;
   else {
     sema_down(&filesys_sema);
     struct file * myfile = NULL;
     struct list_elem * e;
     for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
       struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-      //printf("fd = %d. tmp_info->fd = %d\n", fd, tmp_info->fd);
       if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) { 
         myfile = tmp_info -> file_ptr;
         break;
@@ -157,6 +161,50 @@ int read (void * esp) {
   }
 }
 
+void seek(void * esp) {
+  int argc = 2;
+
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd  = * (int *) (esp + 4);
+  unsigned position = * (unsigned *) (esp + 8);
+  sema_down(&filesys_sema);
+  unsigned result;
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+  }
+  file_seek(myfile, position);
+  sema_up(&filesys_sema);
+}
+
+void close(void * esp) {
+  int argc = 1;
+  
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd = * (int *) (esp + 4);
+  sema_down(&filesys_sema);
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      list_remove(&tmp_info->elem);
+      break;
+    }
+  }
+  file_close(myfile);
+  sema_up(&filesys_sema);
+}
 
 tid_t exec(void * esp) {
   int argc = 1;
@@ -181,7 +229,6 @@ tid_t exec(void * esp) {
 
 int filesize (void * esp) {
   int argc = 1;
-
   if (!are_args_locations_valid(esp, argc))
     terminate_process();
 
@@ -192,13 +239,12 @@ int filesize (void * esp) {
   
   for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
     struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    //printf("HERE\n");
-    //printf("fd = %d. tmp_info->fd = %d\n", fd, tmp_info->fd);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+    
+    if (tmp_info->fd == fd) {
       myfile = tmp_info -> file_ptr;
       break;
     }
-    //printf("<1>\n");
+    
   }
   if (myfile == NULL) {
     sema_up(&filesys_sema);
@@ -220,6 +266,7 @@ void exit (void * esp) {
   int status = * (int *) (esp + 4);
   thread_current()->exit_status = status;
   printf("%s: exit(%d)\n", thread_current()->name, status);
+  
   thread_exit();
 }
 
@@ -230,6 +277,7 @@ int wait (void * esp) {
     terminate_process();
   
   tid_t tid = * (tid_t *) (esp + 4);
+  
   return process_wait(tid);
 }
 
@@ -307,9 +355,11 @@ int open(void * esp) {
   new_info->fd = new_fd;
   new_info->file_ptr = file_ptr;
   new_info->tid = thread_current()->tid;
-  list_push_back(&file_info_list, &new_info->elem);  
-  sema_up(&filesys_sema);
+  list_push_back(&file_info_list, &new_info->elem);
 
+  sema_up(&filesys_sema);
+  if (strcmp(file_copy, thread_current()->name) == 0)
+    file_deny_write(file_ptr);
   palloc_free_page(file_copy);
   return new_fd;
 }
@@ -355,10 +405,12 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = write(f->esp);
       break;
     case SYS_SEEK:                   /* Change position in a file. */
+      seek(f->esp);
       break;
     case SYS_TELL:                   /* Report current position in a file. */
       break;
     case SYS_CLOSE:                  /* Close a file. */
+      close(f->esp);
       break;
     default:
       terminate_process();
