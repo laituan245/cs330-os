@@ -124,6 +124,7 @@ main (int argc, char *argv[])
 
   for (i = 0; i < howmany; i++)
     {
+      msg("i = %d\n", i);
       pid_t child_pid;
 
       /* Spawn a child that will be abnormally terminated.

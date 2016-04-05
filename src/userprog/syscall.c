@@ -52,6 +52,16 @@ allocate_fd (void)
 void terminate_process() {
   thread_current()->exit_status = -1;
   printf("%s: exit(%d)\n", thread_current()->name, -1);
+  sema_down(&filesys_sema);
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+   struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+   if (tmp_info->tid == thread_current()->tid) {
+      list_remove(&tmp_info->elem);
+      file_close(tmp_info->file_ptr);
+   }
+  }
+  sema_up(&filesys_sema);
   thread_exit();
 }
 
@@ -88,9 +98,9 @@ int write (void * esp) {
   
   if (!is_valid(buffer) || !is_valid(buffer + size))
     terminate_process();
-
+ 
   if (fd == 0)
-    return 0;
+    terminate_process();
   else if (fd == 1) {
     putbuf(buffer, size);
     return size;
@@ -108,12 +118,13 @@ int write (void * esp) {
     }
     if (myfile == NULL) {
       sema_up(&filesys_sema);
-      return 0;
+      terminate_process();
     }
     
     void * tmp_buffer = malloc(size);
     memcpy(tmp_buffer, buffer,size);
     int result = file_write (myfile, tmp_buffer, size);
+    free(tmp_buffer);
     sema_up(&filesys_sema);
     return result;
   }
@@ -154,9 +165,9 @@ int read (void * esp) {
     }
     void * tmp_buffer = malloc(size);
     int result = file_read (myfile, tmp_buffer, size);
-    //printf("result = %d. size = %d\n", result, size);
     sema_up(&filesys_sema);
     memcpy(buffer, tmp_buffer,size);
+    free(tmp_buffer);
     return result;
   }
 }
@@ -199,6 +210,7 @@ void close(void * esp) {
     if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
       myfile = tmp_info -> file_ptr;
       list_remove(&tmp_info->elem);
+      free(tmp_info);
       break;
     }
   }
@@ -250,9 +262,7 @@ int filesize (void * esp) {
     sema_up(&filesys_sema);
     return -1;
   }
-  //printf("BEFORE\n");
   int result = file_length(myfile);
-  //printf("AFTER\n");
   sema_up(&filesys_sema);
   return result;
 }
@@ -267,6 +277,7 @@ void exit (void * esp) {
   thread_current()->exit_status = status;
   printf("%s: exit(%d)\n", thread_current()->name, status);
   
+  struct list_elem * e;
   thread_exit();
 }
 
@@ -351,7 +362,9 @@ int open(void * esp) {
   if (file_ptr == NULL)
     return -1;
   int new_fd = allocate_fd();
-  struct file_info *  new_info = palloc_get_page (PAL_ZERO);
+  struct file_info *  new_info = malloc(20);
+  if (new_info == NULL)
+    return -1;
   new_info->fd = new_fd;
   new_info->file_ptr = file_ptr;
   new_info->tid = thread_current()->tid;

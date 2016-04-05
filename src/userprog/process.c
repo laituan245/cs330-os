@@ -31,12 +31,14 @@ struct relationship_info {
   tid_t parent_tid;
   tid_t child_tid;
   struct list_elem elem;
+  struct semaphore sema;
 };
 
 struct pack {
   char * argv;
   struct semaphore * sema;
   bool * loaded;
+  tid_t parent_tid;
 };
 
 static struct list exit_info_list;
@@ -75,6 +77,7 @@ process_execute (const char *argv)
   my_pack.sema = &child_load_sema;
   my_pack.argv = argv_copy;
   my_pack.loaded = &loaded;
+  my_pack.parent_tid = thread_current()->tid;
   tid = thread_create (file_name, PRI_DEFAULT, start_process, &my_pack);
   if (tid == TID_ERROR)
     palloc_free_page (argv_copy);
@@ -82,13 +85,6 @@ process_execute (const char *argv)
    sema_down(&child_load_sema);
    if (!loaded)
      return -1;
-   else {
-     //printf("parent_tid = %d. child_tid = %d\n", thread_current()->tid, tid);
-     struct relationship_info * new_info = malloc(12);
-     new_info->parent_tid = thread_current()->tid;
-     new_info->child_tid = tid;
-     list_push_back(&relationship_list, &new_info->elem);
-   }
   }
   return tid;
 }
@@ -146,6 +142,12 @@ start_process (void * aux)
  
   palloc_free_page(argv);
 
+  struct relationship_info * new_info = malloc(100);
+  new_info->parent_tid = my_pack->parent_tid;
+  new_info->child_tid = thread_current()->tid;
+  sema_init(&new_info->sema,0);
+  list_push_back(&relationship_list, &new_info->elem);
+
   sema_up(sema);
   *loaded = true;
   /* Start the user process by simulating a return from an
@@ -188,18 +190,19 @@ process_wait (tid_t child_tid UNUSED)
   if (!found)
     return -1;
   
-  while (true) {
-    if (!list_empty(&exit_info_list)) {
-      for (e = list_begin(&exit_info_list); e != list_end(&exit_info_list); e = list_next(e)) {
-        struct exit_info * info = list_entry(e, struct exit_info, elem);
-        if (info->tid == child_tid) {
-          list_remove(&info->elem);
-          list_remove(&rls_info->elem);
-          return info->status;
-        }
-      } 
+  sema_down(&rls_info->sema); 
+  for (e = list_begin(&exit_info_list); e != list_end(&exit_info_list); e = list_next(e)) {
+    struct exit_info * info = list_entry(e, struct exit_info, elem);
+    if (info->tid == child_tid) {
+      list_remove(&info->elem);
+      list_remove(&rls_info->elem);
+      free(rls_info);
+      int returned_status = info->status;
+      free(info);
+      return returned_status;
     }
   }
+    
 }
 
 /* Free the current process's resources. */
@@ -225,7 +228,17 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  struct list_elem * e; 
+  for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e = list_next(e)) {
+    struct relationship_info * rls_info = list_entry(e, struct relationship_info, elem);
+    if (rls_info->child_tid == thread_current()->tid) {
+      sema_up(&rls_info->sema); 
+      break;
+    }
+  }
   
+ 
   struct exit_info * new_info = malloc(12);
   new_info->status = curr->exit_status;
   new_info->tid = curr->tid;
