@@ -18,9 +18,9 @@ struct file_info {
   struct list_elem elem;
 };
 
-struct lock fd_lock;
-
 static struct list file_info_list;
+
+struct lock fd_lock;
 
 struct semaphore filesys_sema;
 
@@ -387,7 +387,7 @@ int open(void * esp) {
 
   char * file_copy  = palloc_get_page (0);
   if (file_copy == NULL)
-    return -1;
+    exit(-1);
   strlcpy (file_copy, file, PGSIZE);
 
   sema_down(&filesys_sema);
@@ -402,7 +402,7 @@ int open(void * esp) {
   if (new_info == NULL) {
     file_close(file_ptr);
     sema_up(&filesys_sema);
-    return -1;
+    exit(-1);
   }
   new_info->fd = new_fd;
   new_info->file_ptr = file_ptr;

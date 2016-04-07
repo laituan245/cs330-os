@@ -116,7 +116,7 @@ start_process (void * aux)
   if (!success) {
     palloc_free_page(argv);
     sema_up(sema);
-    thread_exit ();
+    exit(-1);
   }
 
   /* Put the arguments on the stack */
