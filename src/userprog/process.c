@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <list.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -15,42 +16,92 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
+
+struct exit_info {
+  tid_t tid;
+  int status;
+  struct list_elem elem;
+};
+
+struct relationship_info {
+  tid_t parent_tid;
+  tid_t child_tid;
+  struct list_elem elem;
+  struct semaphore sema;
+};
+
+struct pack {
+  char * argv;
+  struct semaphore * sema;
+  bool * loaded;
+  tid_t parent_tid;
+};
+
+static struct list exit_info_list;
+static struct list relationship_list;
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+void process_init() {
+  list_init(&exit_info_list);
+  list_init(&relationship_list);
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *argv) 
 {
-  char *fn_copy;
+  struct pack my_pack;
+  struct semaphore child_load_sema;
+  bool loaded = false;
+  char *argv_copy;
   tid_t tid;
-
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  
+  argv_copy = palloc_get_page (0);
+  if (argv_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (argv_copy, argv, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  char *save_ptr;
+  char *file_name = strtok_r(argv, " ", &save_ptr);
+  
+  sema_init(&child_load_sema, 0);
+  my_pack.sema = &child_load_sema;
+  my_pack.argv = argv_copy;
+  my_pack.loaded = &loaded;
+  my_pack.parent_tid = thread_current()->tid;
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, &my_pack);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (argv_copy);
+  else {
+   sema_down(&child_load_sema);
+   if (!loaded)
+     return -1;
+  }
   return tid;
 }
 
 /* A thread function that loads a user process and makes it start
    running. */
 static void
-start_process (void *f_name)
+start_process (void * aux)
 {
-  char *file_name = f_name;
+  struct pack * my_pack = (struct pack *) aux;
+  void * argv = my_pack->argv;
+  struct semaphore * sema = my_pack->sema;
+  bool * loaded = my_pack->loaded;
+
+  int argc, i;
+  char *save_ptr, *token;
+  char *file_name = strtok_r(argv, " ", &save_ptr);
   struct intr_frame if_;
   bool success;
 
@@ -62,10 +113,43 @@ start_process (void *f_name)
   success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (!success) {
+    palloc_free_page(argv);
+    sema_up(sema);
+    exit(-1);
+  }
 
+  /* Put the arguments on the stack */
+  if_.esp -= (strlen(file_name)+1);
+  strlcpy (if_.esp, file_name ,strlen(file_name) + 1);
+  argc = 1;
+  for (token = strtok_r (NULL, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)) {
+    if_.esp -= (strlen(token) + 1);
+    strlcpy (if_.esp, token ,strlen(token) + 1);
+    argc ++;
+  }
+  char * tmp_ptr = if_.esp;
+  if_.esp -= (((uintptr_t) if_.esp) % 4);
+  if_.esp -= 4;
+  for (i = 0; i < argc; i++) {
+   * (--(char **) if_.esp) = tmp_ptr;
+   tmp_ptr += (strlen(tmp_ptr) + 1);
+  }
+  char ** tmp_ptr2 = if_.esp;
+  * (--(char **) if_.esp) = tmp_ptr2;
+  * (--(int *) if_.esp) = argc;
+  if_.esp -= 4;
+ 
+  palloc_free_page(argv);
+
+  struct relationship_info * new_info = malloc(100);
+  new_info->parent_tid = my_pack->parent_tid;
+  new_info->child_tid = thread_current()->tid;
+  sema_init(&new_info->sema,0);
+  list_push_back(&relationship_list, &new_info->elem);
+
+  sema_up(sema);
+  *loaded = true;
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -90,7 +174,35 @@ start_process (void *f_name)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  struct list_elem * e;
+  struct relationship_info * rls_info;
+  struct thread * curr = thread_current();
+  bool found = false;
+  if (!list_empty(&relationship_list)) {
+    for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e = list_next(e)) { 
+      rls_info = list_entry(e, struct relationship_info, elem);
+      if (rls_info->child_tid == child_tid && rls_info->parent_tid == thread_current()->tid) { 
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found)
+    return -1;
+  
+  sema_down(&rls_info->sema); 
+  for (e = list_begin(&exit_info_list); e != list_end(&exit_info_list); e = list_next(e)) {
+    struct exit_info * info = list_entry(e, struct exit_info, elem);
+    if (info->tid == child_tid) {
+      list_remove(&info->elem);
+      list_remove(&rls_info->elem);
+      free(rls_info);
+      int returned_status = info->status;
+      free(info);
+      return returned_status;
+    }
+  }
+    
 }
 
 /* Free the current process's resources. */
@@ -116,6 +228,21 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  struct list_elem * e; 
+  for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e = list_next(e)) {
+    struct relationship_info * rls_info = list_entry(e, struct relationship_info, elem);
+    if (rls_info->child_tid == thread_current()->tid) {
+      sema_up(&rls_info->sema); 
+      break;
+    }
+  }
+  
+ 
+  struct exit_info * new_info = malloc(12);
+  new_info->status = curr->exit_status;
+  new_info->tid = curr->tid;
+  list_push_back(&exit_info_list, &new_info->elem);
 }
 
 /* Sets up the CPU for running user code in the current
