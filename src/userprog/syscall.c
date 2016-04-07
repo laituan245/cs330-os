@@ -387,7 +387,7 @@ int open(void * esp) {
 
   char * file_copy  = palloc_get_page (0);
   if (file_copy == NULL)
-    exit(-1);
+    return -1;
   strlcpy (file_copy, file, PGSIZE);
 
   sema_down(&filesys_sema);
@@ -402,7 +402,7 @@ int open(void * esp) {
   if (new_info == NULL) {
     file_close(file_ptr);
     sema_up(&filesys_sema);
-    exit(-1);
+    return -1;
   }
   new_info->fd = new_fd;
   new_info->file_ptr = file_ptr;
