@@ -229,6 +229,11 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 
+  struct exit_info * new_info = malloc(12);
+  new_info->status = curr->exit_status;
+  new_info->tid = curr->tid;
+  list_push_back(&exit_info_list, &new_info->elem);
+
   struct list_elem * e; 
   for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e = list_next(e)) {
     struct relationship_info * rls_info = list_entry(e, struct relationship_info, elem);
@@ -237,12 +242,6 @@ process_exit (void)
       break;
     }
   }
-  
- 
-  struct exit_info * new_info = malloc(12);
-  new_info->status = curr->exit_status;
-  new_info->tid = curr->tid;
-  list_push_back(&exit_info_list, &new_info->elem);
 }
 
 /* Sets up the CPU for running user code in the current
