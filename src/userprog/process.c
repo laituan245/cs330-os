@@ -209,6 +209,7 @@ process_wait (tid_t child_tid UNUSED)
 void
 process_exit (void)
 {
+  enum intr_level old_level = intr_disable();
   struct thread *curr = thread_current ();
   uint32_t *pd;
 
@@ -234,14 +235,38 @@ process_exit (void)
   new_info->tid = curr->tid;
   list_push_back(&exit_info_list, &new_info->elem);
 
+  bool parent_process_exited = true;
   struct list_elem * e; 
   for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e = list_next(e)) {
     struct relationship_info * rls_info = list_entry(e, struct relationship_info, elem);
     if (rls_info->child_tid == thread_current()->tid) {
-      sema_up(&rls_info->sema); 
+      parent_process_exited = false;
+      sema_up(&rls_info->sema);
       break;
     }
   }
+
+  if (parent_process_exited) {
+    list_remove(&new_info->elem);
+    free(new_info);
+  }
+
+  for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e =list_next(e)) {
+    struct relationship_info * rls_info = list_entry(e, struct relationship_info, elem);
+    if (rls_info->parent_tid == thread_current()->tid) {
+      list_remove(&rls_info->elem);
+      free(rls_info);
+      struct list_elem * tmp_e;
+      for (tmp_e = list_begin(&exit_info_list); tmp_e != list_end(&exit_info_list); tmp_e = list_next(tmp_e)) {
+        struct exit_info * exit_info = list_entry(tmp_e, struct exit_info, elem);
+        if (exit_info->tid == rls_info->child_tid) {
+          list_remove(&exit_info->elem);
+          free(exit_info);
+        }
+      }
+    }
+  }
+  intr_set_level(old_level);
 }
 
 /* Sets up the CPU for running user code in the current
