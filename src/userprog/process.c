@@ -16,6 +16,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "vm/frame.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -65,7 +66,7 @@ process_execute (const char *argv)
   char *argv_copy;
   tid_t tid;
   
-  argv_copy = palloc_get_page (0);
+  argv_copy = frame_alloc (0);
   if (argv_copy == NULL)
     return TID_ERROR;
   strlcpy (argv_copy, argv, PGSIZE);
@@ -80,7 +81,7 @@ process_execute (const char *argv)
   my_pack.parent_tid = thread_current()->tid;
   tid = thread_create (file_name, PRI_DEFAULT, start_process, &my_pack);
   if (tid == TID_ERROR)
-    palloc_free_page (argv_copy);
+    frame_free (argv_copy);
   else {
    sema_down(&child_load_sema);
    if (!loaded)
@@ -114,7 +115,7 @@ start_process (void * aux)
 
   /* If load failed, quit. */
   if (!success) {
-    palloc_free_page(argv);
+    frame_free(argv);
     sema_up(sema);
     exit(-1);
   }
@@ -140,7 +141,7 @@ start_process (void * aux)
   * (--(int *) if_.esp) = argc;
   if_.esp -= 4;
  
-  palloc_free_page(argv);
+  frame_free(argv);
 
   struct relationship_info * new_info = malloc(100);
   new_info->parent_tid = my_pack->parent_tid;
@@ -550,14 +551,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
+      uint8_t *kpage = frame_alloc (PAL_USER);
       if (kpage == NULL)
         return false;
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page (kpage);
+          frame_free (kpage);
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -565,7 +566,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          palloc_free_page (kpage);
+          frame_free (kpage);
           return false; 
         }
 
@@ -585,14 +586,14 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  kpage = frame_alloc (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
-        palloc_free_page (kpage);
+        frame_free (kpage);
     }
   return success;
 }
@@ -603,7 +604,7 @@ setup_stack (void **esp)
    otherwise, it is read-only.
    UPAGE must not already be mapped.
    KPAGE should probably be a page obtained from the user pool
-   with palloc_get_page().
+   with frame_alloc().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
 static bool

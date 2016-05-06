@@ -7,6 +7,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
+#include "vm/frame.h"
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
 #include "list.h"
