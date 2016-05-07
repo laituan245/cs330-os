@@ -121,6 +121,7 @@ main (void)
 
 #ifdef VM
   swap_table_init();
+  frame_table_init();
 #endif
 
   printf ("Boot complete.\n");

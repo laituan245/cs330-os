@@ -1,12 +1,14 @@
 #ifndef VM_PAGE_H
 #define VM_PAGE_H
 
+#include "threads/thread.h"
 #include "vm/frame.h"
 #include "vm/swap.h"
 #include <hash.h>
 
 struct page {
   struct hash_elem hash_elem; 
+  tid_t pid;
   void * base;
   bool writable;
   struct swap * swap;

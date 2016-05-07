@@ -24,6 +24,7 @@ struct hash * new_pt() {
 struct page * new_page(void * base) {
   struct hash * pages = thread_current()->pt;
   struct page * p = malloc(28);
+  p->pid = thread_current()->tid;
   p->base = pg_round_down(base);
   p->swap = NULL;
   p->frame = NULL;
