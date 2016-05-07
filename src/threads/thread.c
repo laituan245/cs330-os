@@ -14,6 +14,9 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#ifdef VM
+#include "vm/page.h"
+#endif
 
 
 /* Random value for struct thread's `magic' member.
@@ -199,6 +202,10 @@ thread_create (const char *name, int priority,
   /* Stack frame for switch_threads(). */
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
+
+#ifdef VM
+  t->pt = new_pt();
+#endif
 
   /* Add to run queue. */
   thread_unblock (t);
