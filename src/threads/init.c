@@ -29,6 +29,9 @@
 #else
 #include "tests/threads/tests.h"
 #endif
+#ifdef VM
+#include "vm/swap.h"
+#endif
 #ifdef FILESYS
 #include "devices/disk.h"
 #include "filesys/filesys.h"
@@ -114,6 +117,10 @@ main (void)
   /* Initialize file system. */
   disk_init ();
   filesys_init (format_filesys);
+#endif
+
+#ifdef VM
+  swap_table_init();
 #endif
 
   printf ("Boot complete.\n");
