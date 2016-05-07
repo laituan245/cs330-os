@@ -49,6 +49,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
           f->pinned = true;
           palloc_free_page(f->base);
           f->base = palloc_get_page(flags);
+          break;
         }
       }
     }

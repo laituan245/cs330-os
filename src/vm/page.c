@@ -50,6 +50,6 @@ struct page * find_page(void * base) {
   struct hash * pages = thread_current()->pt;
 
   p.base = base;
-  e = hash_find(&pages, &p.hash_elem);
+  e = hash_find(pages, &p.hash_elem);
   return e != NULL ? hash_entry(e, struct page, hash_elem) : NULL;
 }
