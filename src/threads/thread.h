@@ -106,6 +106,7 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     int exit_status;
+    void * data_segment_end;
 #endif
 
 #ifdef VM

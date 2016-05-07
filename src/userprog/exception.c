@@ -160,9 +160,34 @@ page_fault (struct intr_frame *f)
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
 
-  /* Stack growth is not yet implemented */
+  // printf ("Page fault at %p: %s error %s page in %s context.\n",
+  //        fault_addr,
+  //        not_present ? "not present" : "rights violation",
+  //        write ? "writing" : "reading",
+  //        user ? "user" : "kernel");
+
   struct page * p = find_page(pg_round_down(fault_addr));
-  if (p == NULL || (!p->writable && write) || (user && is_kernel_vaddr(fault_addr)))
+  if (p == NULL) {
+    bool is_stack_access = false;
+    if (write && not_present) {
+      void * esp = f->esp;
+      uintptr_t a = (uintptr_t) esp;
+      uintptr_t b = (uintptr_t) fault_addr;
+      uintptr_t c = (uintptr_t) thread_current()->data_segment_end;
+      if (b < PHYS_BASE && b > c && (a <= b || a - 4 == b || a - 32 == b)) {
+        is_stack_access = true;
+        lock_acquire(&pf_handler_lock);
+        struct page * p = new_page(pg_round_down(fault_addr));
+        struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
+        install_page(p->base, p->frame->base, true);
+        f->pinned = false;
+        lock_release(&pf_handler_lock);
+      }
+    }
+    if (!is_stack_access)
+      exit(-1);
+  }
+  else if ((!p->writable && write) || (user && is_kernel_vaddr(fault_addr)))
     exit(-1);
   else {
     int j;

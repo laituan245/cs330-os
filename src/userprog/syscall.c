@@ -77,13 +77,23 @@ void terminate_process() {
   thread_exit();
 }
 
-bool is_valid (void * pointer) {
+bool is_valid (void * esp, void * pointer) {
   if (pointer == NULL)
     return false;
   if (!is_user_vaddr(pointer))
     return false;
-  if (pagedir_get_page(thread_current()->pagedir, pointer) == NULL)
+  struct page * p = find_page( pg_round_down(pointer));
+  if (p == NULL) {
+    uintptr_t a = (uintptr_t) esp;
+    uintptr_t b = (uintptr_t) pointer;
+    uintptr_t c = (uintptr_t) thread_current()->data_segment_end;
+    if (b >= a && b >= c && * (uint32_t *) esp == SYS_READ) {
+      // Seem like a stack access
+      // Let our page fault handler takes care of it
+      return true;
+    }
     return false;
+  }
   return true;
 }
 
@@ -92,7 +102,7 @@ bool are_args_locations_valid (void * esp, int argc) {
   int i;
   for (i = 0; i < argc; i++) {
     tmpptr = tmpptr + 4;
-    if (!is_valid(tmpptr))
+    if (!is_valid(esp, tmpptr))
       return false;
   }
   return true;
@@ -108,7 +118,7 @@ int write (void * esp) {
   void * buffer = * (void **) (esp + 8);
   unsigned size = * (unsigned *) (esp + 12);
   
-  if (!is_valid(buffer) || !is_valid(buffer + size))
+  if (!is_valid(esp, buffer) || !is_valid(esp, buffer + size))
     terminate_process();
  
   if (fd == 0)
@@ -152,7 +162,7 @@ int read (void * esp) {
   void * buffer = * (void **) (esp + 8);
   unsigned size = * (unsigned *) (esp + 12);
 
-  if (!is_valid(buffer) || !is_valid(buffer + size))
+  if (!is_valid(esp, buffer) || !is_valid(esp, buffer + size))
     terminate_process();
 
   if (fd == 0) {
@@ -238,7 +248,7 @@ tid_t exec(void * esp) {
 
   char * cmd_line = * (char * *) (esp + 4);
 
-  if (!is_valid(cmd_line))
+  if (!is_valid(esp, cmd_line))
     terminate_process();
   
   char * argv_copy = palloc_get_page (0);
@@ -333,7 +343,7 @@ bool create(void * esp) {
 
   char * file  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(esp, file))
     terminate_process();
 
   char * file_copy  = palloc_get_page (0);
@@ -358,7 +368,7 @@ bool remove(void * esp) {
 
   char * file  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(esp, file))
     terminate_process();
 
   char * file_copy  = palloc_get_page (0);
@@ -382,7 +392,7 @@ int open(void * esp) {
 
   char * file  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(esp, file))
     terminate_process();
 
   char * file_copy  = palloc_get_page (0);
@@ -422,7 +432,7 @@ static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
   uint32_t syscall_nb;
-  if (!is_valid(f->esp))
+  if (!is_valid(f->esp, f->esp))
     terminate_process();
   syscall_nb = * (uint32_t *) f->esp;
   switch(syscall_nb) {

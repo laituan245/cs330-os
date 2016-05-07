@@ -1,4 +1,5 @@
 #include "vm/frame.h"
+#include "userprog/pagedir.h"
 #include "threads/pte.h"
 
 static struct list frames_list;
@@ -27,9 +28,8 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
       else
         cur = list_next(cur);
       if (!cur_frame->pinned) {
-        uint32_t * pte = lookup_page(pd, cur_frame->page->base ,false);
-        if (*pte & PTE_A)
-          *pte = *pte & ~PTE_A;
+        if (pagedir_is_accessed(pd, cur_frame->page->base))
+          pagedir_set_accessed(pd, cur_frame->page->base, false);
         else {
           // For project 3-1, whether the dirty bit is set or not
           // We will still write the page to some swap slot
@@ -37,8 +37,8 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
           f = cur_frame;
           struct swap * s = allocate_swap();
           struct disk * swap_disk = disk_get(1, 1);
-          *pte = *pte & ~PTE_P;
-          *pte = *pte & ~PTE_D;
+          pagedir_set_dirty(pd, cur_frame->page->base, false);
+          pagedir_clear_page(pd, cur_frame->page->base);
           for (j = 0; j < SECTORS_PER_SWAP; j++)
             disk_write(swap_disk, s->base + j, f->base + j * DISK_SECTOR_SIZE);
           f->page->frame = NULL;
