@@ -4,6 +4,13 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "threads/synch.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+
+static struct lock pf_handler_lock;
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -29,6 +36,7 @@ static void page_fault (struct intr_frame *);
 void
 exception_init (void) 
 {
+  lock_init(&pf_handler_lock);
   /* These exceptions can be raised explicitly by a user program,
      e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
      we set DPL==3, meaning that user programs are allowed to
@@ -151,11 +159,24 @@ page_fault (struct intr_frame *f)
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+
+  /* Stack growth is not yet implemented */
+  struct page * p = find_page(pg_round_down(fault_addr));
+  if (p == NULL || (!p->writable && write) || (user && is_kernel_vaddr(fault_addr)))
+    exit(-1);
+  else {
+    int j;
+    lock_acquire(&pf_handler_lock);
+    struct swap * s = p->swap;
+    struct disk * swap_disk = disk_get(1, 1);
+    struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
+    install_page(p->base, p->frame->base, true);
+    for (j = 0; j < SECTORS_PER_SWAP; j++)
+      disk_read(swap_disk, s->base + j, p->base + j * DISK_SECTOR_SIZE);
+    free_swap(s);
+    install_page(p->base, p->frame->base, p->writable);
+    f->pinned = false;
+    lock_release(&pf_handler_lock);
+  }
 }
 
