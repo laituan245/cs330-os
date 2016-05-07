@@ -117,9 +117,11 @@ int write (void * esp) {
   int fd = * (int *) (esp + 4);
   void * buffer = * (void **) (esp + 8);
   unsigned size = * (unsigned *) (esp + 12);
-  
-  if (!is_valid(esp, buffer) || !is_valid(esp, buffer + size))
-    terminate_process();
+ 
+  int i;
+  for (i = 0; i < size; i++)
+    if (!is_valid(esp, buffer + i))
+      terminate_process();
  
   if (fd == 0)
     terminate_process();
@@ -162,8 +164,10 @@ int read (void * esp) {
   void * buffer = * (void **) (esp + 8);
   unsigned size = * (unsigned *) (esp + 12);
 
-  if (!is_valid(esp, buffer) || !is_valid(esp, buffer + size))
-    terminate_process();
+  int i;
+  for (i = 0; i < size; i++)
+    if (!is_valid(esp, buffer + i))
+      terminate_process();
 
   if (fd == 0) {
     return 0;
