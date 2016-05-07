@@ -44,6 +44,8 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
           f->page->frame = NULL;
           f->page->swap = s;
           f->page = p;
+          p->frame = f;
+          p->swap = NULL;
           f->pinned = true;
           palloc_free_page(f->base);
           f->base = palloc_get_page(flags);
@@ -53,6 +55,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
   }
   else {
     f->page = p;
+    p->frame = f;
     f->pinned = true;
     list_push_front(&frames_list, &f->elem);
     if (cur == NULL)
