@@ -12,5 +12,7 @@ struct swap {
 void swap_table_init();
 struct swap * allocate_swap();
 void free_swap(struct swap *);
+void swap_in(struct page *p);
+void swap_out(struct page *p);
 
 #endif /* vm/swap.h */

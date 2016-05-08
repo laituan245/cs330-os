@@ -31,9 +31,9 @@ struct swap * allocate_swap() {
 /* Swap out the content of a page. Assume that the content of
    the page is currently stored in some frame */
 void swap_out(struct page *p) {
+  sema_down(&p->page_sema);
   int j;
   uint32_t *pd = thread_current()->pagedir;
-  sema_down(&p->loaded_sema);
   ASSERT(p->frame != NULL);
   pagedir_set_dirty(pd, p->base, false);
   pagedir_clear_page(pd, p->base);
@@ -46,15 +46,15 @@ void swap_out(struct page *p) {
   lock_release(&swap_disk_lock);
   p->frame = NULL;
   p->swap = s;
-  sema_up(&p->loaded_sema);
+  sema_up(&p->page_sema);
 }
 
 
 /* Swap in the content of a page. Assume that the content of 
    the page is currently stored in some swapping slot */
 void swap_in(struct page *p) {
+  sema_down(&p->page_sema);
   int j;
-  sema_down(&p->loaded_sema);
   ASSERT(p->swap != NULL);
   struct disk * sdisk = disk_get(1, 1);
   struct swap * s = p->swap;
@@ -66,7 +66,7 @@ void swap_in(struct page *p) {
   lock_release(&swap_disk_lock);
   free_swap(s);
   install_page(p->base, p->frame->base, p->writable);
-  sema_up(&p->loaded_sema);
+  sema_up(&p->page_sema);
 }
 
 void free_swap(struct swap * s) {

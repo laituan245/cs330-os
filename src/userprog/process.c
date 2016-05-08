@@ -593,7 +593,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           return false; 
         }
       page->writable = writable;
-      sema_up(&page->loaded_sema);
       frame->pinned = false;
 
       /* Advance. */
@@ -619,7 +618,6 @@ setup_stack (void **esp)
   success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
   if (success) {
     *esp = PHYS_BASE;
-    sema_up(&page->loaded_sema);
     page->writable = true;
   }
   else {

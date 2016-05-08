@@ -28,7 +28,7 @@ struct page * new_page(void * base) {
   p->base = pg_round_down(base);
   p->swap = NULL;
   p->frame = NULL;
-  sema_init(&p->loaded_sema, 0);  // Means 'not yet loaded'
+  sema_init(&p->page_sema, 1);
   hash_insert(pages, &p->hash_elem);
   return p;
 }
@@ -53,4 +53,13 @@ struct page * find_page(void * base) {
   p.base = base;
   e = hash_find(pages, &p.hash_elem);
   return e != NULL ? hash_entry(e, struct page, hash_elem) : NULL;
+}
+
+void stack_growth(void * addr) {
+   struct page * p = new_page(pg_round_down(addr));
+   sema_down(&p->page_sema);
+   struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);     
+   install_page(p->base, p->frame->base, true);                   
+   f->pinned = false;
+   sema_up(&p->page_sema);
 }
