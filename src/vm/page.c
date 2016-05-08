@@ -16,7 +16,7 @@ bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *au
 }
 
 struct hash * new_pt() {
-  struct hash * pages = malloc(24);
+  struct hash * pages = malloc(sizeof (struct hash));
   hash_init(pages, page_hash, page_less, NULL);
   return pages;
 }

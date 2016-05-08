@@ -165,7 +165,6 @@ page_fault (struct intr_frame *f)
   //        not_present ? "not present" : "rights violation",
   //        write ? "writing" : "reading",
   //        user ? "user" : "kernel");
-
   struct page * p = find_page(pg_round_down(fault_addr));
   if (p == NULL) {
     bool is_stack_access = false;
@@ -191,19 +190,9 @@ page_fault (struct intr_frame *f)
   else if ((!p->writable && write) || (user && is_kernel_vaddr(fault_addr)))
     exit(-1);
   else {
-    int j;
-    sema_down(&p->loaded_sema);
     lock_acquire(&pf_handler_lock);
-    struct swap * s = p->swap;
-    struct disk * swap_disk = disk_get(1, 1);
-    struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
-    install_page(p->base, p->frame->base, true);
-    for (j = 0; j < SECTORS_PER_SWAP; j++)
-      disk_read(swap_disk, s->base + j, p->base + j * DISK_SECTOR_SIZE);
-    free_swap(s);
-    install_page(p->base, p->frame->base, p->writable);
-    sema_up(&p->loaded_sema);
-    f->pinned = false;
+    swap_in(p);
+    p->frame->pinned = false;
     lock_release(&pf_handler_lock);
   }
 }
