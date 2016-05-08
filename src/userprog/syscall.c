@@ -125,9 +125,14 @@ int write (void * esp) {
  
   if (fd == 0)
     terminate_process();
-  else if (fd == 1) {
-    putbuf(buffer, size);
-    return size;
+
+  int result;
+  void * tmp_buffer = malloc(size);
+  memcpy(tmp_buffer, buffer,size);
+
+  if (fd == 1) {
+    putbuf(tmp_buffer, size);
+    result = size;
   }
   else  {
     sema_down(&filesys_sema);
@@ -144,14 +149,11 @@ int write (void * esp) {
       sema_up(&filesys_sema);
       terminate_process();
     }
-    
-    void * tmp_buffer = malloc(size);
-    memcpy(tmp_buffer, buffer,size);
-    int result = file_write (myfile, tmp_buffer, size);
-    free(tmp_buffer);
+    result = file_write (myfile, tmp_buffer, size);
     sema_up(&filesys_sema);
-    return result;
   }
+  free(tmp_buffer);
+  return result;
 }
 
 int read (void * esp) {
