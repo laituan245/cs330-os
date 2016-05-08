@@ -4,6 +4,13 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "threads/synch.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+
+static struct lock pf_handler_lock;
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -29,6 +36,7 @@ static void page_fault (struct intr_frame *);
 void
 exception_init (void) 
 {
+  lock_init(&pf_handler_lock);
   /* These exceptions can be raised explicitly by a user program,
      e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
      we set DPL==3, meaning that user programs are allowed to
@@ -151,11 +159,41 @@ page_fault (struct intr_frame *f)
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+
+  // printf ("Page fault at %p: %s error %s page in %s context.\n",
+  //        fault_addr,
+  //        not_present ? "not present" : "rights violation",
+  //        write ? "writing" : "reading",
+  //        user ? "user" : "kernel");
+  if (!not_present)
+    exit(-1);
+  struct page * p = find_page(pg_round_down(fault_addr));
+  if (p == NULL) {
+    bool is_stack_access = false;
+    if (write && not_present) {
+      void * esp = f->esp;
+      uintptr_t a = (uintptr_t) esp;
+      uintptr_t b = (uintptr_t) fault_addr;
+      uintptr_t c = (uintptr_t) thread_current()->data_segment_end;
+      if (b < PHYS_BASE && b > c && (a <= b || a - 4 == b || a - 32 == b)) {
+        is_stack_access = true;
+        lock_acquire(&pf_handler_lock);
+        struct page * p = new_page(pg_round_down(fault_addr));
+        struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
+        install_page(p->base, p->frame->base, true);
+        sema_up(&p->loaded_sema);
+        f->pinned = false;
+        lock_release(&pf_handler_lock);
+      }
+    }
+    if (!is_stack_access)
+      exit(-1);
+  }
+  else {
+    lock_acquire(&pf_handler_lock);
+    swap_in(p);
+    p->frame->pinned = false;
+    lock_release(&pf_handler_lock);
+  }
 }
 

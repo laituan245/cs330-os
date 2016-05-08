@@ -10,6 +10,9 @@
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
 #include "list.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "devices/disk.h"
 
 struct file_info {
   int fd;
@@ -22,7 +25,7 @@ static struct list file_info_list;
 
 struct lock fd_lock;
 
-struct semaphore filesys_sema;
+struct lock filesys_lock;
 
 static void syscall_handler (struct intr_frame *);
 
@@ -31,7 +34,7 @@ syscall_init (void)
 {
   lock_init(&fd_lock);
   list_init(&file_info_list);
-  sema_init(&filesys_sema, 1);
+  lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -52,7 +55,8 @@ allocate_fd (void)
 void terminate_process() {
   thread_current()->exit_status = -1;
   printf("%s: exit(%d)\n", thread_current()->name, -1);
-  sema_down(&filesys_sema);
+  if (!lock_held_by_current_thread(&filesys_lock))
+    lock_acquire(&filesys_lock);
   struct list_elem * e;
   struct file_info * tmp_info;
   bool freedsth;
@@ -73,17 +77,65 @@ void terminate_process() {
       break;
   }
  
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
   thread_exit();
 }
 
-bool is_valid (void * pointer) {
+void pin_pages(void * buffer, unsigned size) {
+  void * start = pg_round_down(buffer);
+  void * end = pg_round_down(buffer + size - 1);
+  void * cur;
+  for (cur = start; cur <= end; cur += PGSIZE) {
+    struct page * p = find_page(cur);
+    if (p == NULL) {
+      p = new_page(pg_round_down(cur));
+      struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
+      install_page(p->base, p->frame->base, true);
+      sema_up(&p->loaded_sema);
+    }
+    else {
+      sema_down(&p->loaded_sema);
+      if (p->frame != NULL)
+        p->frame->pinned = true;
+      else
+        swap_in(p);
+      sema_up(&p->loaded_sema);
+    }
+  }
+}
+
+void unpin_pages(void * buffer, unsigned size) {
+  void * start = pg_round_down(buffer);
+  void * end = pg_round_down(buffer + size - 1);
+  void * cur;
+  for (cur = start; cur <= end; cur += PGSIZE) {
+    struct page * p = find_page(cur);
+    if (p != NULL) {
+      sema_down(&p->loaded_sema);
+      if (p->frame != NULL)
+        p->frame->pinned = false;
+      sema_up(&p->loaded_sema);
+    }
+  }
+}
+
+bool is_valid (void * esp, void * pointer) {
   if (pointer == NULL)
     return false;
   if (!is_user_vaddr(pointer))
     return false;
-  if (pagedir_get_page(thread_current()->pagedir, pointer) == NULL)
+  struct page * p = find_page( pg_round_down(pointer));
+  if (p == NULL) {
+    uintptr_t a = (uintptr_t) esp;
+    uintptr_t b = (uintptr_t) pointer;
+    uintptr_t c = (uintptr_t) thread_current()->data_segment_end;
+    if (b >= a && b >= c && * (uint32_t *) esp == SYS_READ) {
+      // Seem like a stack access
+      // Let our page fault handler takes care of it
+      return true;
+    }
     return false;
+  }
   return true;
 }
 
@@ -92,7 +144,7 @@ bool are_args_locations_valid (void * esp, int argc) {
   int i;
   for (i = 0; i < argc; i++) {
     tmpptr = tmpptr + 4;
-    if (!is_valid(tmpptr))
+    if (!is_valid(esp, tmpptr))
       return false;
   }
   return true;
@@ -107,18 +159,24 @@ int write (void * esp) {
   int fd = * (int *) (esp + 4);
   void * buffer = * (void **) (esp + 8);
   unsigned size = * (unsigned *) (esp + 12);
-  
-  if (!is_valid(buffer) || !is_valid(buffer + size))
-    terminate_process();
+ 
+  int i;
+  for (i = 0; i < size; i++)
+    if (!is_valid(esp, buffer + i))
+      terminate_process();
  
   if (fd == 0)
     terminate_process();
-  else if (fd == 1) {
+  
+  int result;
+  pin_pages(buffer,size);  
+
+  if (fd == 1) {
     putbuf(buffer, size);
-    return size;
+    result = size;
   }
   else  {
-    sema_down(&filesys_sema);
+    lock_acquire(&filesys_lock);
     struct file * myfile = NULL;
     struct list_elem * e;
     for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
@@ -129,17 +187,14 @@ int write (void * esp) {
       }
     }
     if (myfile == NULL) {
-      sema_up(&filesys_sema);
+      lock_release(&filesys_lock);
       terminate_process();
     }
-    
-    void * tmp_buffer = malloc(size);
-    memcpy(tmp_buffer, buffer,size);
-    int result = file_write (myfile, tmp_buffer, size);
-    free(tmp_buffer);
-    sema_up(&filesys_sema);
-    return result;
+    result = file_write (myfile, buffer, size);
+    lock_release(&filesys_lock);
   }
+  unpin_pages(buffer,size);
+  return result;
 }
 
 int read (void * esp) {
@@ -152,16 +207,25 @@ int read (void * esp) {
   void * buffer = * (void **) (esp + 8);
   unsigned size = * (unsigned *) (esp + 12);
 
-  if (!is_valid(buffer) || !is_valid(buffer + size))
-    terminate_process();
+  int i;
+  for (i = 0; i < size; i++)
+    if (!is_valid(esp, buffer + i))
+      terminate_process();
 
-  if (fd == 0) {
+  if (fd == 1) {
     return 0;
   }
-  else if (fd == 1)
-    return 0;
+
+  int result;
+  pin_pages(buffer, size);
+  lock_acquire(&filesys_lock);
+
+  if (fd == 0) {
+    for(i = 0; i < size; i++)
+      memcpy(buffer + i, input_getc(), 1);
+    result = size;
+  }
   else {
-    sema_down(&filesys_sema);
     struct file * myfile = NULL;
     struct list_elem * e;
     for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
@@ -172,16 +236,14 @@ int read (void * esp) {
       } 
     }
     if (myfile == NULL) {
-      sema_up(&filesys_sema);
+      lock_release(&filesys_lock);
       return -1;
     }
-    void * tmp_buffer = malloc(size);
-    int result = file_read (myfile, tmp_buffer, size);
-    sema_up(&filesys_sema);
-    memcpy(buffer, tmp_buffer,size);
-    free(tmp_buffer);
-    return result;
+    result = file_read (myfile, buffer, size);
   }
+  lock_release(&filesys_lock);
+  unpin_pages(buffer, size);
+  return result;
 }
 
 void seek(void * esp) {
@@ -192,7 +254,7 @@ void seek(void * esp) {
 
   int fd  = * (int *) (esp + 4);
   unsigned position = * (unsigned *) (esp + 8);
-  sema_down(&filesys_sema);
+  lock_acquire(&filesys_lock);
   unsigned result;
   struct file * myfile = NULL;
   struct list_elem * e;
@@ -204,7 +266,30 @@ void seek(void * esp) {
     }
   }
   file_seek(myfile, position);
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
+}
+
+unsigned tell(void * esp) {
+  int argc = 1;
+
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd  = * (int *) (esp + 4);
+  lock_acquire(&filesys_lock);
+  unsigned result;
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+  }
+  result = file_tell(myfile);
+  lock_release(&filesys_lock);
+  return result;
 }
 
 void close(void * esp) {
@@ -214,7 +299,7 @@ void close(void * esp) {
     terminate_process();
 
   int fd = * (int *) (esp + 4);
-  sema_down(&filesys_sema);
+  lock_acquire(&filesys_lock);
   struct file * myfile = NULL;
   struct list_elem * e;
   for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
@@ -227,7 +312,7 @@ void close(void * esp) {
     }
   }
   file_close(myfile);
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
 }
 
 tid_t exec(void * esp) {
@@ -238,7 +323,7 @@ tid_t exec(void * esp) {
 
   char * cmd_line = * (char * *) (esp + 4);
 
-  if (!is_valid(cmd_line))
+  if (!is_valid(esp, cmd_line))
     terminate_process();
   
   char * argv_copy = palloc_get_page (0);
@@ -257,7 +342,7 @@ int filesize (void * esp) {
     terminate_process();
 
   int fd = * (int *) (esp + 4);
-  sema_down(&filesys_sema);
+  lock_acquire(&filesys_lock);
   struct file * myfile = NULL;
   struct list_elem * e;
   
@@ -271,11 +356,11 @@ int filesize (void * esp) {
     
   }
   if (myfile == NULL) {
-    sema_up(&filesys_sema);
+    lock_release(&filesys_lock);
     return -1;
   }
   int result = file_length(myfile);
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
   return result;
 }
 
@@ -288,7 +373,7 @@ void exit (void * esp) {
   int status = * (int *) (esp + 4);
   thread_current()->exit_status = status;
   printf("%s: exit(%d)\n", thread_current()->name, status);
-  sema_down(&filesys_sema);  
+  lock_acquire(&filesys_lock);  
   struct list_elem * e;
   struct file_info * tmp_info;
   bool freedsth;
@@ -309,7 +394,7 @@ void exit (void * esp) {
       break;
   }
 
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
 
   thread_exit();
 }
@@ -333,7 +418,7 @@ bool create(void * esp) {
 
   char * file  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(esp, file))
     terminate_process();
 
   char * file_copy  = palloc_get_page (0);
@@ -342,9 +427,9 @@ bool create(void * esp) {
   strlcpy (file_copy, file, PGSIZE);
   
   unsigned initial_size = * (unsigned *) (esp + 8);
-  sema_down(&filesys_sema);
+  lock_acquire(&filesys_lock);
   bool result = filesys_create (file_copy, initial_size);
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
 
   palloc_free_page(file_copy);
   return result;
@@ -358,7 +443,7 @@ bool remove(void * esp) {
 
   char * file  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(esp, file))
     terminate_process();
 
   char * file_copy  = palloc_get_page (0);
@@ -366,9 +451,9 @@ bool remove(void * esp) {
     return false;
   strlcpy (file_copy, file, PGSIZE);
 
-  sema_down(&filesys_sema);
+  lock_acquire(&filesys_lock);
   bool result = filesys_remove (file_copy);
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
 
   palloc_free_page(file_copy);
   return result;
@@ -382,7 +467,7 @@ int open(void * esp) {
 
   char * file  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(esp, file))
     terminate_process();
 
   char * file_copy  = palloc_get_page (0);
@@ -390,10 +475,10 @@ int open(void * esp) {
     return -1;
   strlcpy (file_copy, file, PGSIZE);
 
-  sema_down(&filesys_sema);
+  lock_acquire(&filesys_lock);
   struct file * file_ptr = filesys_open (file_copy);
   if (file_ptr == NULL) {
-    sema_up(&filesys_sema);
+    lock_release(&filesys_lock);
     return -1;
   }
   int new_fd = allocate_fd();
@@ -401,7 +486,7 @@ int open(void * esp) {
   struct file_info *  new_info = malloc(sizeof (tmp_info));
   if (new_info == NULL) {
     file_close(file_ptr);
-    sema_up(&filesys_sema);
+    lock_release(&filesys_lock);
     return -1;
   }
   new_info->fd = new_fd;
@@ -409,7 +494,7 @@ int open(void * esp) {
   new_info->tid = thread_current()->tid;
   list_push_back(&file_info_list, &new_info->elem);
 
-  sema_up(&filesys_sema);
+  lock_release(&filesys_lock);
   if (strcmp(file_copy, thread_current()->name) == 0)
     file_deny_write(file_ptr);
   palloc_free_page(file_copy);
@@ -422,7 +507,7 @@ static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
   uint32_t syscall_nb;
-  if (!is_valid(f->esp))
+  if (!is_valid(f->esp, f->esp))
     terminate_process();
   syscall_nb = * (uint32_t *) f->esp;
   switch(syscall_nb) {
@@ -460,6 +545,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       seek(f->esp);
       break;
     case SYS_TELL:                   /* Report current position in a file. */
+      f->eax = tell(f->esp);
       break;
     case SYS_CLOSE:                  /* Close a file. */
       close(f->esp);
