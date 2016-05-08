@@ -37,12 +37,14 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
           f = cur_frame;
           struct swap * s = allocate_swap();
           struct disk * swap_disk = disk_get(1, 1);
+          sema_down(&f->page->loaded_sema);
           pagedir_set_dirty(pd, cur_frame->page->base, false);
           pagedir_clear_page(pd, cur_frame->page->base);
           for (j = 0; j < SECTORS_PER_SWAP; j++)
             disk_write(swap_disk, s->base + j, f->base + j * DISK_SECTOR_SIZE);
           f->page->frame = NULL;
           f->page->swap = s;
+          sema_up(&f->page->loaded_sema);
           f->page = p;
           p->frame = f;
           p->swap = NULL;

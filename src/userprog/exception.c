@@ -180,6 +180,7 @@ page_fault (struct intr_frame *f)
         struct page * p = new_page(pg_round_down(fault_addr));
         struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
         install_page(p->base, p->frame->base, true);
+        sema_up(&p->loaded_sema);
         f->pinned = false;
         lock_release(&pf_handler_lock);
       }
@@ -191,6 +192,7 @@ page_fault (struct intr_frame *f)
     exit(-1);
   else {
     int j;
+    sema_down(&p->loaded_sema);
     lock_acquire(&pf_handler_lock);
     struct swap * s = p->swap;
     struct disk * swap_disk = disk_get(1, 1);
@@ -200,6 +202,7 @@ page_fault (struct intr_frame *f)
       disk_read(swap_disk, s->base + j, p->base + j * DISK_SECTOR_SIZE);
     free_swap(s);
     install_page(p->base, p->frame->base, p->writable);
+    sema_up(&p->loaded_sema);
     f->pinned = false;
     lock_release(&pf_handler_lock);
   }

@@ -2,6 +2,7 @@
 #define VM_PAGE_H
 
 #include "threads/thread.h"
+#include "threads/synch.h"
 #include "vm/frame.h"
 #include "vm/swap.h"
 #include <hash.h>
@@ -13,6 +14,7 @@ struct page {
   bool writable;
   struct swap * swap;
   struct frame * frame;
+  struct semaphore loaded_sema;
 };
 
 struct hash * new_pt();

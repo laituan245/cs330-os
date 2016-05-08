@@ -23,11 +23,12 @@ struct hash * new_pt() {
 
 struct page * new_page(void * base) {
   struct hash * pages = thread_current()->pt;
-  struct page * p = malloc(28);
+  struct page * p = malloc(64);
   p->pid = thread_current()->tid;
   p->base = pg_round_down(base);
   p->swap = NULL;
   p->frame = NULL;
+  sema_init(&p->loaded_sema, 0);  // Means 'not yet loaded'
   hash_insert(pages, &p->hash_elem);
   return p;
 }
