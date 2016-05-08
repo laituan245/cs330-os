@@ -21,6 +21,6 @@ struct hash * new_pt();
 struct page * new_page(void * base);
 struct page * find_page(void * base);
 void stack_growth(void * addr);
-void free_page(struct page *);
+void free_page(struct hash *, struct page *);
 
 #endif /* vm/page.h */

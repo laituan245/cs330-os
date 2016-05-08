@@ -238,7 +238,7 @@ process_exit (void)
         hash_first (&i, pt);
         if (hash_next (&i)) {
           struct page *p = hash_entry (hash_cur (&i), struct page, hash_elem);
-          free_page(p);
+          free_page(pt, p);
         }
         else
           break;
@@ -580,7 +580,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           frame->pinned = false;
-          free_page (page);
+          free_page (thread_current()->pt, page);
           return false;
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -589,7 +589,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (!install_page (upage, kpage, writable)) 
         {
           frame->pinned = false;
-          free_page(page);
+          free_page(thread_current()->pt, page);
           return false; 
         }
       page->writable = writable;
@@ -622,7 +622,7 @@ setup_stack (void **esp)
   }
   else {
     frame->pinned = false;
-    free_page(page);
+    free_page(thread_current()->pt, page);
   }
   frame->pinned = false;
   return success;

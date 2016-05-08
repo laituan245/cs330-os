@@ -33,10 +33,9 @@ struct page * new_page(void * base) {
   return p;
 }
 
-void free_page(struct page * p) {
+void free_page(struct hash * pages, struct page * p) {
   ASSERT(p != NULL);
 
-  struct hash * pages = thread_current()->pt;
   if (p->swap != NULL)
     free_swap(p->swap);
   if (p->frame != NULL)
