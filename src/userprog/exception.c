@@ -165,6 +165,8 @@ page_fault (struct intr_frame *f)
   //        not_present ? "not present" : "rights violation",
   //        write ? "writing" : "reading",
   //        user ? "user" : "kernel");
+  if (!not_present)
+    exit(-1);
   struct page * p = find_page(pg_round_down(fault_addr));
   if (p == NULL) {
     bool is_stack_access = false;
@@ -187,8 +189,6 @@ page_fault (struct intr_frame *f)
     if (!is_stack_access)
       exit(-1);
   }
-  else if ((!p->writable && write) || (user && is_kernel_vaddr(fault_addr)))
-    exit(-1);
   else {
     lock_acquire(&pf_handler_lock);
     swap_in(p);
