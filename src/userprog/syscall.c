@@ -10,6 +10,9 @@
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
 #include "list.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "devices/disk.h"
 
 struct file_info {
   int fd;
@@ -77,6 +80,34 @@ void terminate_process() {
   thread_exit();
 }
 
+void pin_pages(void * buffer, unsigned size) {
+  void * start = pg_round_down(buffer);
+  void * end = pg_round_down(buffer + size - 1);
+  void * cur;
+  for (cur = start; cur <= end; cur += PGSIZE) {
+    struct page * p = find_page(cur);
+    sema_down(&p->loaded_sema);
+    if (p->frame != NULL)
+      p->frame->pinned = true;
+    else
+      swap_in(p);
+    sema_up(&p->loaded_sema);
+  }
+}
+
+void unpin_pages(void * buffer, unsigned size) {
+  void * start = pg_round_down(buffer);
+  void * end = pg_round_down(buffer + size - 1);
+  void * cur;
+  for (cur = start; cur <= end; cur += PGSIZE) {
+    struct page * p = find_page(cur);
+    sema_down(&p->loaded_sema);
+    if (p->frame != NULL)
+      p->frame->pinned = false;
+    sema_up(&p->loaded_sema);
+  }
+}
+
 bool is_valid (void * esp, void * pointer) {
   if (pointer == NULL)
     return false;
@@ -125,13 +156,12 @@ int write (void * esp) {
  
   if (fd == 0)
     terminate_process();
-
+  
   int result;
-  void * tmp_buffer = malloc(size);
-  memcpy(tmp_buffer, buffer,size);
+  pin_pages(buffer,size);  
 
   if (fd == 1) {
-    putbuf(tmp_buffer, size);
+    putbuf(buffer, size);
     result = size;
   }
   else  {
@@ -149,10 +179,10 @@ int write (void * esp) {
       sema_up(&filesys_sema);
       terminate_process();
     }
-    result = file_write (myfile, tmp_buffer, size);
+    result = file_write (myfile, buffer, size);
     sema_up(&filesys_sema);
   }
-  free(tmp_buffer);
+  unpin_pages(buffer,size);
   return result;
 }
 
@@ -171,13 +201,20 @@ int read (void * esp) {
     if (!is_valid(esp, buffer + i))
       terminate_process();
 
-  if (fd == 0) {
+  if (fd == 1) {
     return 0;
   }
-  else if (fd == 1)
-    return 0;
+
+  int result;
+  pin_pages(buffer, size);
+  sema_down(&filesys_sema);
+
+  if (fd == 0) {
+    for(i = 0; i < size; i++)
+      memcpy(buffer + i, input_getc(), 1);
+    result = size;
+  }
   else {
-    sema_down(&filesys_sema);
     struct file * myfile = NULL;
     struct list_elem * e;
     for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
@@ -191,13 +228,11 @@ int read (void * esp) {
       sema_up(&filesys_sema);
       return -1;
     }
-    void * tmp_buffer = malloc(size);
-    int result = file_read (myfile, tmp_buffer, size);
-    sema_up(&filesys_sema);
-    memcpy(buffer, tmp_buffer,size);
-    free(tmp_buffer);
-    return result;
+    result = file_read (myfile, buffer, size);
   }
+  sema_up(&filesys_sema);
+  unpin_pages(buffer, size);
+  return result;
 }
 
 void seek(void * esp) {
