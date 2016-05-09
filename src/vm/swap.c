@@ -33,13 +33,15 @@ struct swap * allocate_swap() {
 void swap_out(struct page *p) {
   sema_down(&p->page_sema);
   int j;
-  uint32_t *pd = thread_current()->pagedir;
+  
   ASSERT(p->frame != NULL);
-  pagedir_set_dirty(pd, p->base, false);
-  pagedir_clear_page(pd, p->base);
+  struct frame * f = p->frame;
+  struct thread *t = f->thread;
+  pagedir_set_dirty(t->pagedir, p->base, false);
+  pagedir_clear_page(t->pagedir, p->base);
   struct disk * sdisk = disk_get(1,1);
   struct swap * s = allocate_swap();
-  struct frame * f = p->frame;
+  
   lock_acquire(&swap_disk_lock);
   for (j = 0; j < SECTORS_PER_SWAP; j++)
     disk_write(sdisk, s->base + j, f->base + j * DISK_SECTOR_SIZE);

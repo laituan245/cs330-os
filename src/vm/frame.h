@@ -10,6 +10,7 @@ struct frame {
   struct page * page;
   struct list_elem elem;
   bool pinned;
+  struct thread *thread;
 };
 
 void frame_table_init();
