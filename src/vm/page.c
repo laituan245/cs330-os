@@ -35,11 +35,12 @@ struct page * new_page(void * base) {
 
 void free_page(struct hash * pages, struct page * p) {
   ASSERT(p != NULL);
-
+  sema_down(&p->page_sema);
   if (p->swap != NULL)
     free_swap(p->swap);
   if (p->frame != NULL)
     free_frame(p->frame);
+  sema_up(&p->page_sema);
   hash_delete(pages, &p->hash_elem);
   free(p);
 }

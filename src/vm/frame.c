@@ -20,7 +20,6 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
   f->base = palloc_get_page(flags);
   if (f->base == NULL) {
     // Need to evict some page from its frame
-    uint32_t *pd = thread_current()->pagedir;
     while (true) {
       struct frame * cur_frame = list_entry(cur, struct frame, elem);
       if (cur == list_end(&frames_list))
@@ -28,8 +27,9 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
       else
 	cur = list_next(cur);
       if (!cur_frame->pinned) {
-        if (pagedir_is_accessed(pd, cur_frame->page->base))
-	  pagedir_set_accessed(pd, cur_frame->page->base, false);
+        struct thread *t = cur_frame->thread;
+        if (pagedir_is_accessed(t->pagedir, cur_frame->page->base))
+	         pagedir_set_accessed(t->pagedir, cur_frame->page->base, false);
 	else {
           /* For project 3-1, whether the dirty bit is set or not, 
              we will still write the page to some swap slot */
@@ -39,6 +39,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
           f->page = p;
           p->frame = f;
           p->swap = NULL;
+          f->thread = thread_current();
           palloc_free_page(f->base);
           f->base = palloc_get_page(flags);
           break;
@@ -50,6 +51,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
     f->page = p;
     p->frame = f;
     f->pinned = false;
+    f->thread = thread_current();
     if (cur == NULL) {
       list_push_front(&frames_list, &f->elem);
       cur = list_begin(&frames_list);
@@ -64,7 +66,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
 void free_frame(struct frame * f) {
   ASSERT(f != NULL);
   sema_down(&sema);
-  if (!f->pinned) {
+  if (f->thread == thread_current()) {
     struct frame * cur_frame = list_entry(cur, struct frame, elem);
     if (cur_frame == f) {
       if (list_size(&frames_list) == 1)
