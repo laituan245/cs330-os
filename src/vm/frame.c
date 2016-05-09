@@ -12,6 +12,13 @@ void frame_table_init() {
   cur = NULL;
 }
 
+void move_cur_ptr(){
+  if (cur == list_end(&frames_list))
+        cur = list_begin(&frames_list);
+      else
+        cur = list_next(cur);
+}
+
 struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
   ASSERT(flags & PAL_USER);
   int j;
@@ -20,21 +27,17 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
   f->base = palloc_get_page(flags);
   if (f->base == NULL) {
     // Need to evict some page from its frame
+    free(f);
     while (true) {
-      struct frame * cur_frame = list_entry(cur, struct frame, elem);
-      if (cur == list_end(&frames_list))
-	cur = list_begin(&frames_list);
-      else
-	cur = list_next(cur);
-      if (!cur_frame->pinned) {
-        struct thread *t = cur_frame->thread;
-        if (pagedir_is_accessed(t->pagedir, cur_frame->page->base))
-	         pagedir_set_accessed(t->pagedir, cur_frame->page->base, false);
+      f = list_entry(cur, struct frame, elem);
+      move_cur_ptr();
+      if (!f->pinned) {
+        struct thread *t = f->thread;
+        if (pagedir_is_accessed(t->pagedir, f->page->base))
+	         pagedir_set_accessed(t->pagedir, f->page->base, false);
 	else {
           /* For project 3-1, whether the dirty bit is set or not, 
              we will still write the page to some swap slot */
-          free(f);
-          f = cur_frame;
           swap_out(f->page);
           f->page = p;
           p->frame = f;
@@ -71,12 +74,8 @@ void free_frame(struct frame * f) {
     if (cur_frame == f) {
       if (list_size(&frames_list) == 1)
         cur = NULL;
-      else {
-        if (cur == list_end(&frames_list))
-          cur = list_begin(&frames_list);
-        else
-          cur = list_next(cur);
-      }
+      else
+        move_cur_ptr();
     }
     list_remove(&f->elem);
     palloc_free_page(f->base);

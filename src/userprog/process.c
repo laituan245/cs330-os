@@ -215,6 +215,20 @@ process_exit (void)
   struct thread *curr = thread_current ();
   uint32_t *pd;
 
+  // Let's free resources
+  struct hash * pt = curr->pt;
+  struct hash_iterator i;
+  while (true) {
+    hash_first (&i, pt);
+    if (hash_next (&i)) {
+      struct page *p = hash_entry (hash_cur (&i), struct page, hash_elem);
+      free_page(pt, p);
+    }
+    else
+      break;
+  }
+  free(pt);
+  
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = curr->pagedir;
@@ -229,20 +243,6 @@ process_exit (void)
          that's been freed (and cleared). */
       curr->pagedir = NULL;
       pagedir_activate (NULL);
-
-      // Let's free resources
-      struct hash * pt = curr->pt;
-      struct hash_iterator i;
-      while (true) {
-        hash_first (&i, pt);
-        if (hash_next (&i)) {
-          struct page *p = hash_entry (hash_cur (&i), struct page, hash_elem);
-          free_page(pt, p);
-        }
-        else
-          break;
-      }
-      free(pt);
 
       uint32_t * pde;
       for (pde = pd; pde < pd + pd_no (PHYS_BASE); pde++)
