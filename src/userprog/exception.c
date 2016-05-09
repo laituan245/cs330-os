@@ -188,10 +188,6 @@ page_fault (struct intr_frame *f)
   else {
     lock_acquire(&pf_handler_lock);
     swap_in(p);
-    sema_down(&p->page_sema);
-    if (p->frame != NULL)
-      p->frame->pinned = false;
-    sema_up(&p->page_sema);
     lock_release(&pf_handler_lock);
   }
 }

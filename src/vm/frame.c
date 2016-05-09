@@ -39,7 +39,6 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
           f->page = p;
           p->frame = f;
           p->swap = NULL;
-          f->pinned = true;
           palloc_free_page(f->base);
           f->base = palloc_get_page(flags);
           break;
@@ -50,10 +49,13 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
   else {
     f->page = p;
     p->frame = f;
-    f->pinned = true;
-    list_push_front(&frames_list, &f->elem);
-    if (cur == NULL)
+    f->pinned = false;
+    if (cur == NULL) {
+      list_push_front(&frames_list, &f->elem);
       cur = list_begin(&frames_list);
+    }
+    else
+      list_insert(cur,&f->elem);
   }
   sema_up(&sema);
   return f;
