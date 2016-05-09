@@ -66,6 +66,7 @@ void swap_in(struct page *p) {
   for (j = 0; j < SECTORS_PER_SWAP; j++)
     disk_read(sdisk, s->base + j, p->base + j * DISK_SECTOR_SIZE);
   lock_release(&swap_disk_lock);
+  p->swap = NULL;
   free_swap(s);
   install_page(p->base, p->frame->base, p->writable);
   sema_up(&p->page_sema);

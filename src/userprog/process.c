@@ -212,7 +212,6 @@ process_wait (tid_t child_tid UNUSED)
 void
 process_exit (void)
 {
-  enum intr_level old_level = intr_disable();
   struct thread *curr = thread_current ();
   uint32_t *pd;
 
@@ -254,7 +253,8 @@ process_exit (void)
         }
       palloc_free_page (pd);
     }
-
+ 
+  enum intr_level old_level = intr_disable();
   struct exit_info * new_info = malloc(12);
   new_info->status = curr->exit_status;
   new_info->tid = curr->tid;
