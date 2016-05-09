@@ -178,11 +178,7 @@ page_fault (struct intr_frame *f)
       if (b < PHYS_BASE && b > c && (a <= b || a - 4 == b || a - 32 == b)) {
         is_stack_access = true;
         lock_acquire(&pf_handler_lock);
-        struct page * p = new_page(pg_round_down(fault_addr));
-        struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
-        install_page(p->base, p->frame->base, true);
-        sema_up(&p->loaded_sema);
-        f->pinned = false;
+        stack_growth(fault_addr);
         lock_release(&pf_handler_lock);
       }
     }
@@ -192,7 +188,6 @@ page_fault (struct intr_frame *f)
   else {
     lock_acquire(&pf_handler_lock);
     swap_in(p);
-    p->frame->pinned = false;
     lock_release(&pf_handler_lock);
   }
 }

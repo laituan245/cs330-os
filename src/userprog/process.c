@@ -238,7 +238,7 @@ process_exit (void)
         hash_first (&i, pt);
         if (hash_next (&i)) {
           struct page *p = hash_entry (hash_cur (&i), struct page, hash_elem);
-          free_page(p);
+          free_page(pt, p);
         }
         else
           break;
@@ -579,8 +579,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          frame->pinned = false;
-          free_page (page);
+          sema_up(&page->page_sema);
+          free_page (thread_current()->pt, page);
           return false;
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -588,13 +588,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          frame->pinned = false;
-          free_page(page);
+          sema_up(&page->page_sema);
+          free_page(thread_current()->pt, page);
           return false; 
         }
       page->writable = writable;
-      sema_up(&page->loaded_sema);
-      frame->pinned = false;
+      sema_up(&page->page_sema);
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -619,14 +618,14 @@ setup_stack (void **esp)
   success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
   if (success) {
     *esp = PHYS_BASE;
-    sema_up(&page->loaded_sema);
     page->writable = true;
+    sema_up(&page->page_sema);
   }
   else {
-    frame->pinned = false;
-    free_page(page);
+   sema_up(&page->page_sema);
+   free_page(thread_current()->pt, page);
   }
-  frame->pinned = false;
+
   return success;
 }
 

@@ -14,12 +14,13 @@ struct page {
   bool writable;
   struct swap * swap;
   struct frame * frame;
-  struct semaphore loaded_sema;
+  struct sema * page_sema;
 };
 
 struct hash * new_pt();
 struct page * new_page(void * base);
 struct page * find_page(void * base);
-void free_page(struct page *);
+void stack_growth(void * addr);
+void free_page(struct hash *, struct page *);
 
 #endif /* vm/page.h */

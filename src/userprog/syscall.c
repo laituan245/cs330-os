@@ -87,19 +87,15 @@ void pin_pages(void * buffer, unsigned size) {
   void * cur;
   for (cur = start; cur <= end; cur += PGSIZE) {
     struct page * p = find_page(cur);
-    if (p == NULL) {
-      p = new_page(pg_round_down(cur));
-      struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
-      install_page(p->base, p->frame->base, true);
-      sema_up(&p->loaded_sema);
-    }
+    if (p == NULL)
+      stack_growth(cur);
     else {
-      sema_down(&p->loaded_sema);
+      sema_down(&p->page_sema);
       if (p->frame != NULL)
         p->frame->pinned = true;
-      else
+      sema_up(&p->page_sema);
+      if (p->frame == NULL)
         swap_in(p);
-      sema_up(&p->loaded_sema);
     }
   }
 }
@@ -110,12 +106,7 @@ void unpin_pages(void * buffer, unsigned size) {
   void * cur;
   for (cur = start; cur <= end; cur += PGSIZE) {
     struct page * p = find_page(cur);
-    if (p != NULL) {
-      sema_down(&p->loaded_sema);
-      if (p->frame != NULL)
-        p->frame->pinned = false;
-      sema_up(&p->loaded_sema);
-    }
+    p->frame->pinned = false;
   }
 }
 
