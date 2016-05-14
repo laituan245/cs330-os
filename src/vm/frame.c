@@ -38,7 +38,17 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
 	else {
           /* For project 3-1, whether the dirty bit is set or not, 
              we will still write the page to some swap slot */
-          swap_out(f->page);
+          sema_down(&f->page->page_sema);
+          if (f->page->from_executable && !pagedir_is_dirty(t->pagedir, f->page->base)) {
+            pagedir_set_dirty(t->pagedir, f->page->base, false); 
+            pagedir_clear_page(t->pagedir, f->page->base);
+            f->page->swap = NULL;
+            f->page->frame = NULL;
+            f->page->loc = EXECUTABLE;
+          }
+          else
+            swap_out(f->page);
+          sema_up(&f->page->page_sema);
           f->page = p;
           p->frame = f;
           p->swap = NULL;
@@ -62,6 +72,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
     else
       list_insert(cur,&f->elem);
   }
+  p->loc = MEMORY;
   sema_up(&sema);
   return f;
 }

@@ -31,33 +31,29 @@ struct swap * allocate_swap() {
 /* Swap out the content of a page. Assume that the content of
    the page is currently stored in some frame */
 void swap_out(struct page *p) {
-  sema_down(&p->page_sema);
+  ASSERT(p->page_sema.value == 0);
   int j;
-  
-  ASSERT(p->frame != NULL);
   struct frame * f = p->frame;
   struct thread *t = f->thread;
   pagedir_set_dirty(t->pagedir, p->base, false);
   pagedir_clear_page(t->pagedir, p->base);
   struct disk * sdisk = disk_get(1,1);
   struct swap * s = allocate_swap();
-  
   lock_acquire(&swap_disk_lock);
   for (j = 0; j < SECTORS_PER_SWAP; j++)
     disk_write(sdisk, s->base + j, f->base + j * DISK_SECTOR_SIZE);
   lock_release(&swap_disk_lock);
   p->frame = NULL;
   p->swap = s;
-  sema_up(&p->page_sema);
+  p->loc = SWAP;
 }
 
 
 /* Swap in the content of a page. Assume that the content of 
    the page is currently stored in some swapping slot */
 void swap_in(struct page *p) {
-  sema_down(&p->page_sema);
+  ASSERT(p->page_sema.value == 0);
   int j;
-  ASSERT(p->swap != NULL);
   struct disk * sdisk = disk_get(1, 1);
   struct swap * s = p->swap;
   struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
@@ -69,7 +65,7 @@ void swap_in(struct page *p) {
   p->swap = NULL;
   free_swap(s);
   install_page(p->base, p->frame->base, p->writable);
-  sema_up(&p->page_sema);
+  p->loc = MEMORY;
 }
 
 void free_swap(struct swap * s) {

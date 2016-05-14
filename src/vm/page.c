@@ -23,11 +23,13 @@ struct hash * new_pt() {
 
 struct page * new_page(void * base) {
   struct hash * pages = thread_current()->pt;
-  struct page * p = malloc(64);
+  struct page * p = malloc(sizeof (struct page));
   p->pid = thread_current()->tid;
   p->base = pg_round_down(base);
   p->swap = NULL;
   p->frame = NULL;
+  p->from_executable = false;
+  p->loc = NONE;
   sema_init(&p->page_sema, 0);
   hash_insert(pages, &p->hash_elem);
   return p;
@@ -36,9 +38,9 @@ struct page * new_page(void * base) {
 void free_page(struct hash * pages, struct page * p) {
   ASSERT(p != NULL);
   sema_down(&p->page_sema);
-  if (p->swap != NULL)
+  if (p->loc == SWAP)
     free_swap(p->swap);
-  if (p->frame != NULL)
+  if (p->loc == MEMORY)
     free_frame(p->frame);
   sema_up(&p->page_sema);
   hash_delete(pages, &p->hash_elem);
@@ -59,5 +61,24 @@ void stack_growth(void * addr) {
    struct page * p = new_page(pg_round_down(addr));
    struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);     
    install_page(p->base, p->frame->base, true);
+   p->loc = MEMORY;
    sema_up(&p->page_sema);
+}
+
+void load_page(struct page * p) {
+  ASSERT(p->page_sema.value == 0);
+  if (p->loc == SWAP)
+    swap_in(p);
+  else if (p->loc == EXECUTABLE) {
+    struct frame  * frame = allocate_frame(p, PAL_USER | PAL_ZERO);
+    uint8_t *kpage = frame->base;
+    struct file * file = thread_current()->executable;
+    size_t page_read_bytes = p->page_read_bytes;
+    if (page_read_bytes != 0) {
+      file_seek (file, p->ofs);
+      file_read (file, kpage, page_read_bytes);
+    }
+    install_page (p->base, kpage, p->writable);
+    p->loc = MEMORY;
+  }
 }

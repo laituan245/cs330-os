@@ -55,29 +55,21 @@ allocate_fd (void)
 void terminate_process() {
   thread_current()->exit_status = -1;
   printf("%s: exit(%d)\n", thread_current()->name, -1);
-  if (!lock_held_by_current_thread(&filesys_lock))
-    lock_acquire(&filesys_lock);
   struct list_elem * e;
   struct file_info * tmp_info;
-  bool freedsth;
-  while(true) {
-    freedsth = false;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      tmp_info = list_entry(e, struct file_info, elem);
-      if (tmp_info->tid == thread_current()->tid) {
-        list_remove(&tmp_info->elem);
-        file_close(tmp_info->file_ptr);   
-        tmp_info->file_ptr = NULL;
-        free(tmp_info);
-        freedsth = true;
-        break;
-     }
-    }
-    if (!freedsth)
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->tid == thread_current()->tid) {
+      if (!lock_held_by_current_thread(&filesys_lock))
+        lock_acquire(&filesys_lock);
+      list_remove(&tmp_info->elem);
+      file_close(tmp_info->file_ptr);
+      tmp_info->file_ptr = NULL;
+      free(tmp_info);
+      lock_release(&filesys_lock);
       break;
+    }
   }
- 
-  lock_release(&filesys_lock);
   thread_exit();
 }
 
@@ -93,9 +85,11 @@ void pin_pages(void * buffer, unsigned size) {
       sema_down(&p->page_sema);
       if (p->frame != NULL)
         p->frame->pinned = true;
+      else {
+        load_page(p);
+        p->frame->pinned = true;
+      }
       sema_up(&p->page_sema);
-      if (p->frame == NULL)
-        swap_in(p);
     }
   }
 }

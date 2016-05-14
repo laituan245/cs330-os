@@ -6,6 +6,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
+#include "filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -107,6 +108,7 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     int exit_status;
     void * data_segment_end;
+    struct file * executable;
 #endif
 
 #ifdef VM
