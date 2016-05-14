@@ -36,8 +36,6 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
         if (pagedir_is_accessed(t->pagedir, f->page->base))
 	         pagedir_set_accessed(t->pagedir, f->page->base, false);
 	else {
-          /* For project 3-1, whether the dirty bit is set or not, 
-             we will still write the page to some swap slot */
           sema_down(&f->page->page_sema);
           if (f->page->from_executable && !pagedir_is_dirty(t->pagedir, f->page->base)) {
             pagedir_set_dirty(t->pagedir, f->page->base, false); 
