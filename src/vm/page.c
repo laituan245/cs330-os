@@ -1,5 +1,6 @@
 #include "vm/page.h"
 #include "threads/thread.h"
+#include "threads/interrupt.h"
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
 #include <debug.h>
@@ -22,6 +23,7 @@ struct hash * new_pt() {
 }
 
 struct page * new_page(void * base) {
+  enum intr_level old_level = intr_disable();
   struct hash * pages = thread_current()->pt;
   struct page * p = malloc(sizeof (struct page));
   p->pid = thread_current()->tid;
@@ -32,6 +34,7 @@ struct page * new_page(void * base) {
   p->loc = NONE;
   sema_init(&p->page_sema, 0);
   hash_insert(pages, &p->hash_elem);
+  intr_set_level(old_level);
   return p;
 }
 

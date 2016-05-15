@@ -12,7 +12,8 @@ enum data_location {
   NONE,
   MEMORY,
   SWAP,
-  EXECUTABLE
+  EXECUTABLE,
+  MMAP
 };
 
 struct page {
@@ -24,7 +25,9 @@ struct page {
   enum data_location loc;
   struct swap * swap;
   struct frame * frame;
-  off_t ofs;
+  struct file * mmappedfile;
+  off_t mmapped_ofs; // For mmapped file
+  off_t ofs;         // For executable file
   size_t page_read_bytes;
   struct semaphore page_sema;
 };

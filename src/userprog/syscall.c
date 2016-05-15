@@ -14,6 +14,8 @@
 #include "vm/frame.h"
 #include "devices/disk.h"
 
+typedef int mapid_t;
+
 struct file_info {
   int fd;
   tid_t tid;
@@ -486,7 +488,53 @@ int open(void * esp) {
   return new_fd;
 }
 
+mapid_t mmap (void * esp) {
+  int i;
+  int argc = 2;
 
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd  = * (int *) (esp + 4);
+  void * addr = * (void **) (esp + 8);
+  if (fd == 0 || fd == 1)
+    return -1;
+
+  if ((uintptr_t) addr % PGSIZE != 0 || (uintptr_t) addr == 0)
+    return -1;
+
+  lock_acquire(&filesys_lock);
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+  }
+  if (myfile == NULL) {
+    lock_release(&filesys_lock);
+    return -1;
+  }
+  int filelength = file_length(myfile);
+  if (filelength == 0)
+    return -1;
+
+  int nbofpages = filelength / PGSIZE;
+  if (filelength % PGSIZE > 0)
+    nbofpages++;
+
+  enum intr_level old_level = intr_disable();
+  void * tmp_addr = addr;
+  for (i = 0; i < nbofpages; i++) {
+    if(find_page(tmp_addr))
+      return -1;
+    tmp_addr += PGSIZE;
+  }
+  intr_set_level(old_level);
+  lock_release(&filesys_lock);
+}
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -534,6 +582,11 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
     case SYS_CLOSE:                  /* Close a file. */
       close(f->esp);
+      break;
+    case SYS_MMAP:                   /* Map a file into memory. */
+      f->eax = mmap(f->esp);
+      break;
+    case SYS_MUNMAP:                 /* Remove a memory mapping. */
       break;
     default:
       terminate_process();
