@@ -1,4 +1,5 @@
 #include "vm/page.h"
+#include "filesys/file.h"
 #include "threads/thread.h"
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
@@ -31,6 +32,7 @@ struct page * new_page(void * base) {
   p->swap = NULL;
   p->frame = NULL;
   p->from_executable = false;
+  p->is_mmapped = false;
   p->loc = NONE;
   sema_init(&p->page_sema, 0);
   hash_insert(pages, &p->hash_elem);
@@ -73,15 +75,36 @@ void load_page(struct page * p) {
   if (p->loc == SWAP)
     swap_in(p);
   else if (p->loc == EXECUTABLE) {
+    lock_acquire(get_filesys_lock());
     struct frame  * frame = allocate_frame(p, PAL_USER | PAL_ZERO);
     uint8_t *kpage = frame->base;
-    struct file * file = thread_current()->executable;
-    size_t page_read_bytes = p->page_read_bytes;
-    if (page_read_bytes != 0) {
-      file_seek (file, p->ofs);
-      file_read (file, kpage, page_read_bytes);
+
+    if (p->page_read_bytes != 0) {
+      file_seek (thread_current()->executable, p->ofs);
+      file_read (thread_current()->executable, kpage, p->page_read_bytes);
     }
+
     install_page (p->base, kpage, p->writable);
     p->loc = MEMORY;
+    lock_release(get_filesys_lock());
   }
+  else if (p->loc == MMAP) {
+    lock_acquire(get_filesys_lock());
+    struct frame  * frame = allocate_frame(p, PAL_USER | PAL_ZERO);
+    uint8_t *kpage = frame->base;
+    struct file * file = p->mmappedfile;
+    off_t offset = p->mmapped_ofs;
+    size_t page_read_bytes = PGSIZE;
+    if (page_read_bytes < file_length(file) - offset)
+      page_read_bytes = file_length(file) - offset;
+    if (page_read_bytes != 0) {
+      file_seek (file, offset);
+      file_read (file, kpage, page_read_bytes);
+    }
+
+    install_page (p->base, kpage, p->writable);
+    p->loc = MEMORY;
+    lock_release(get_filesys_lock());
+  }
+
 }

@@ -22,6 +22,7 @@ struct page {
   void * base;
   bool writable;
   bool from_executable;
+  bool is_mmapped;
   enum data_location loc;
   struct swap * swap;
   struct frame * frame;

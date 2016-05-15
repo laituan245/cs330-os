@@ -1,5 +1,7 @@
 #include "vm/frame.h"
+#include "userprog/syscall.h"
 #include "userprog/pagedir.h"
+#include "filesys/file.h"
 #include "threads/pte.h"
 
 static struct list frames_list;
@@ -38,11 +40,28 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
 	else {
           sema_down(&f->page->page_sema);
           if (f->page->from_executable && !pagedir_is_dirty(t->pagedir, f->page->base)) {
-            pagedir_set_dirty(t->pagedir, f->page->base, false); 
             pagedir_clear_page(t->pagedir, f->page->base);
             f->page->swap = NULL;
             f->page->frame = NULL;
             f->page->loc = EXECUTABLE;
+          }
+          else if (f->page->is_mmapped && pagedir_is_dirty(t->pagedir, f->page->base)) {
+            pagedir_set_dirty(t->pagedir, f->page->base, false);       
+            pagedir_clear_page(t->pagedir, f->page->base);
+            lock_acquire(get_filesys_lock());
+            struct file * file = f->page->mmappedfile;
+            off_t offset = f->page->mmapped_ofs;
+            size_t page_read_bytes = PGSIZE;
+            if (page_read_bytes < file_length(file) - offset)
+              page_read_bytes = file_length(file) - offset;
+            if (page_read_bytes != 0) {
+              file_seek(file, offset);
+              file_read(file, f->base, page_read_bytes);
+            }
+            lock_release(get_filesys_lock()); 
+	    f->page->swap = NULL;
+            f->page->frame = NULL;
+            f->page->loc = MMAP;
           }
           else
             swap_out(f->page);

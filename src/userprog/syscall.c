@@ -23,9 +23,20 @@ struct file_info {
   struct list_elem elem;
 };
 
+struct file_mapping_info {
+  mapid_t mid;
+  struct file * file;
+  void * addr;
+  struct list_elem elem;
+};
+
 static struct list file_info_list;
 
+static struct list file_mapping_info_list;
+
 struct lock fd_lock;
+
+struct lock mid_lock;
 
 struct lock filesys_lock;
 
@@ -35,13 +46,18 @@ void
 syscall_init (void) 
 {
   lock_init(&fd_lock);
+  lock_init(&mid_lock);
   list_init(&file_info_list);
+  list_init(&file_mapping_info_list);
   lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-static int allocate_fd (void)
-{
+struct lock * get_filesys_lock() {
+  return &filesys_lock;
+}
+
+static int allocate_fd (void) {
   static int next_fd = 2;
   int fd;
 
@@ -51,6 +67,18 @@ static int allocate_fd (void)
 
   return fd;
 }
+
+static mapid_t allocate_mid (void) {
+  static mapid_t next_mid = 1;
+  int mid;
+
+  lock_acquire (&mid_lock);
+  mid = next_mid++;
+  lock_release (&mid_lock);
+
+  return mid;
+}
+
 
 
 struct file * get_file (int fd) {
@@ -75,13 +103,10 @@ void terminate_process() {
   for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
     tmp_info = list_entry(e, struct file_info, elem);
     if (tmp_info->tid == thread_current()->tid) {
-      if (!lock_held_by_current_thread(&filesys_lock))
-        lock_acquire(&filesys_lock);
       list_remove(&tmp_info->elem);
       file_close(tmp_info->file_ptr);
       tmp_info->file_ptr = NULL;
       free(tmp_info);
-      lock_release(&filesys_lock);
       break;
     }
   }
@@ -330,7 +355,6 @@ void exit (void * esp) {
   int status = * (int *) (esp + 4);
   thread_current()->exit_status = status;
   printf("%s: exit(%d)\n", thread_current()->name, status);
-  lock_acquire(&filesys_lock);  
   struct list_elem * e;
   struct file_info * tmp_info;
   bool freedsth;
@@ -350,9 +374,6 @@ void exit (void * esp) {
     if (!freedsth)
       break;
   }
-
-  lock_release(&filesys_lock);
-
   thread_exit();
 }
 
@@ -494,8 +515,31 @@ mapid_t mmap (void * esp) {
       return -1;
     tmp_addr += PGSIZE;
   }
+
+  struct file * mappedfile = file_reopen(myfile);
+  off_t mmapped_ofs = 0;
+
+  tmp_addr = addr;
+  for (i = 0; i < nbofpages; i++) {
+    struct page * p = new_page(tmp_addr);
+    p->loc = MMAP;
+    p->mmappedfile = mappedfile;
+    p->mmapped_ofs = mmapped_ofs;
+    p->is_mmapped = true;
+    mmapped_ofs += PGSIZE;
+    sema_up(&p->page_sema);
+    tmp_addr += PGSIZE;
+  }
+
+  struct file_mapping_info * new_info = malloc(sizeof(struct file_mapping_info));
+  new_info->mid = allocate_mid();
+  new_info->file = mappedfile;
+  new_info->addr = addr;
+  list_push_back(&file_mapping_info_list, &new_info->elem);
+
   intr_set_level(old_level);
   lock_release(&filesys_lock);
+  return new_info->mid;
 }
 
 static void
