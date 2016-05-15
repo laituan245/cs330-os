@@ -56,7 +56,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
               page_read_bytes = file_length(file) - offset;
             if (page_read_bytes != 0) {
               file_seek(file, offset);
-              file_read(file, f->base, page_read_bytes);
+              file_write(file, f->base, page_read_bytes);
             }
             lock_release(get_filesys_lock()); 
 	    f->page->swap = NULL;

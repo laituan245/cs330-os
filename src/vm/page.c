@@ -1,4 +1,5 @@
 #include "vm/page.h"
+#include "userprog/syscall.h"
 #include "filesys/file.h"
 #include "threads/thread.h"
 #include "threads/interrupt.h"
@@ -106,5 +107,28 @@ void load_page(struct page * p) {
     p->loc = MEMORY;
     lock_release(get_filesys_lock());
   }
+}
 
+void remove_mapping (struct page * p) {
+  ASSERT (p->is_mmapped);
+  ASSERT (p->page_sema.value == 0);
+  if (p->loc == MEMORY) {
+    if (pagedir_is_dirty(thread_current()->pagedir, p->base)) {
+      void * tmp_addr = p->base;
+      lock_acquire(get_filesys_lock());
+      struct file * file = p->mmappedfile;
+      off_t offset = p->mmapped_ofs;
+      size_t page_read_bytes = PGSIZE;
+      if (page_read_bytes < file_length(file) - offset)
+        page_read_bytes = file_length(file) - offset;
+      if (page_read_bytes != 0) {
+        file_seek(file, offset);
+        file_write(file, p->frame->base, page_read_bytes);
+      }
+      lock_release(get_filesys_lock());
+    }
+  }
+  p->swap = NULL;
+  p->frame = NULL;
+  p->loc = MMAP;
 }

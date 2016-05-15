@@ -40,6 +40,8 @@ struct lock mid_lock;
 
 struct lock filesys_lock;
 
+struct lock mm_lock;
+
 static void syscall_handler (struct intr_frame *);
 
 void
@@ -47,6 +49,7 @@ syscall_init (void)
 {
   lock_init(&fd_lock);
   lock_init(&mid_lock);
+  lock_init(&mm_lock);
   list_init(&file_info_list);
   list_init(&file_mapping_info_list);
   lock_init(&filesys_lock);
@@ -508,11 +511,14 @@ mapid_t mmap (void * esp) {
   if (filelength % PGSIZE > 0)
     nbofpages++;
 
+  lock_acquire(&mm_lock);
   enum intr_level old_level = intr_disable();
   void * tmp_addr = addr;
   for (i = 0; i < nbofpages; i++) {
-    if(find_page(tmp_addr))
+    if(find_page(tmp_addr)) {
+      lock_release(&mm_lock);
       return -1;
+    }
     tmp_addr += PGSIZE;
   }
 
@@ -526,6 +532,7 @@ mapid_t mmap (void * esp) {
     p->mmappedfile = mappedfile;
     p->mmapped_ofs = mmapped_ofs;
     p->is_mmapped = true;
+    p->writable = true;
     mmapped_ofs += PGSIZE;
     sema_up(&p->page_sema);
     tmp_addr += PGSIZE;
@@ -539,7 +546,46 @@ mapid_t mmap (void * esp) {
 
   intr_set_level(old_level);
   lock_release(&filesys_lock);
+  lock_release(&mm_lock);
   return new_info->mid;
+}
+
+void munmap(void * esp) {
+  int argc = 1;
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  lock_acquire(&mm_lock);
+  mapid_t mid  = * (mapid_t *) (esp + 4);
+  struct list_elem * e;
+  struct file_mapping_info * info = NULL;
+  for (e = list_begin(&file_mapping_info_list); e != list_end(&file_mapping_info_list); e = list_next(e)) {
+    info = list_entry(e, struct file_mapping_info, elem);
+    if (info->mid == mid) {
+      list_remove(&info->elem);
+      break;
+    }
+    info = NULL;
+  }
+  
+  if (info != NULL) {
+    void * tmp_addr = info->addr;
+    int filelength = file_length(info->file);
+    int nbofpages = filelength / PGSIZE;
+    if (filelength % PGSIZE > 0)
+      nbofpages++;
+    int i;
+    for (i = 0; i < nbofpages; i++) {
+      struct page * p = find_page(tmp_addr);
+      sema_down(&p->page_sema);
+      pagedir_clear_page(thread_current()->pagedir, p->base);
+      remove_mapping(p); 
+      sema_up(&p->page_sema);
+      free_page(thread_current()->pt, p);
+      tmp_addr += PGSIZE;
+    }
+  }
+  lock_release(&mm_lock);
 }
 
 static void
@@ -593,6 +639,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = mmap(f->esp);
       break;
     case SYS_MUNMAP:                 /* Remove a memory mapping. */
+      munmap(f->esp);
       break;
     default:
       terminate_process();

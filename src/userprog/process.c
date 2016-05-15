@@ -222,6 +222,10 @@ process_exit (void)
     hash_first (&i, pt);
     if (hash_next (&i)) {
       struct page *p = hash_entry (hash_cur (&i), struct page, hash_elem);
+      sema_down(&p->page_sema);
+      if (p->is_mmapped)
+        remove_mapping(p);
+      sema_up(&p->page_sema);
       free_page(pt, p);
     }
     else

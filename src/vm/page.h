@@ -39,5 +39,6 @@ struct page * find_page(void * base);
 void stack_growth(void * addr);
 void free_page(struct hash *, struct page *);
 void load_page();
+void remove_mapping (struct page *);
 
 #endif /* vm/page.h */
