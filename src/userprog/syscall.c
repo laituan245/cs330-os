@@ -40,8 +40,7 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-static int
-allocate_fd (void)
+static int allocate_fd (void)
 {
   static int next_fd = 2;
   int fd;
@@ -53,6 +52,20 @@ allocate_fd (void)
   return fd;
 }
 
+
+struct file * get_file (int fd) {
+  ASSERT(lock_held_by_current_thread (&filesys_lock));
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+  }
+  return myfile;
+}
 
 void terminate_process() {
   thread_current()->exit_status = -1;
@@ -164,15 +177,7 @@ int write (void * esp) {
   }
   else  {
     lock_acquire(&filesys_lock);
-    struct file * myfile = NULL;
-    struct list_elem * e;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-        myfile = tmp_info -> file_ptr;
-        break;
-      }
-    }
+    struct file * myfile = get_file(fd);
     if (myfile == NULL) {
       lock_release(&filesys_lock);
       terminate_process();
@@ -213,15 +218,7 @@ int read (void * esp) {
     result = size;
   }
   else {
-    struct file * myfile = NULL;
-    struct list_elem * e;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) { 
-        myfile = tmp_info -> file_ptr;
-        break;
-      } 
-    }
+    struct file * myfile = get_file(fd);
     if (myfile == NULL) {
       lock_release(&filesys_lock);
       return -1;
@@ -243,15 +240,7 @@ void seek(void * esp) {
   unsigned position = * (unsigned *) (esp + 8);
   lock_acquire(&filesys_lock);
   unsigned result;
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-  }
+  struct file * myfile = get_file(fd);
   file_seek(myfile, position);
   lock_release(&filesys_lock);
 }
@@ -265,15 +254,7 @@ unsigned tell(void * esp) {
   int fd  = * (int *) (esp + 4);
   lock_acquire(&filesys_lock);
   unsigned result;
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-  }
+  struct file * myfile = get_file(fd);
   result = file_tell(myfile);
   lock_release(&filesys_lock);
   return result;
@@ -330,18 +311,7 @@ int filesize (void * esp) {
 
   int fd = * (int *) (esp + 4);
   lock_acquire(&filesys_lock);
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    
-    if (tmp_info->fd == fd) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-    
-  }
+  struct file * myfile = get_file(fd);
   if (myfile == NULL) {
     lock_release(&filesys_lock);
     return -1;
@@ -504,15 +474,7 @@ mapid_t mmap (void * esp) {
     return -1;
 
   lock_acquire(&filesys_lock);
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-  }
+  struct file * myfile = get_file(fd);
   if (myfile == NULL) {
     lock_release(&filesys_lock);
     return -1;
