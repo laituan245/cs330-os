@@ -39,32 +39,40 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
 	         pagedir_set_accessed(t->pagedir, f->page->base, false);
 	else {
           sema_down(&f->page->page_sema);
-          if (f->page->from_executable && !pagedir_is_dirty(t->pagedir, f->page->base)) {
-            pagedir_clear_page(t->pagedir, f->page->base);
-            f->page->swap = NULL;
-            f->page->frame = NULL;
-            f->page->loc = EXECUTABLE;
-          }
-          else if (f->page->is_mmapped && pagedir_is_dirty(t->pagedir, f->page->base)) {
-            pagedir_set_dirty(t->pagedir, f->page->base, false);       
-            pagedir_clear_page(t->pagedir, f->page->base);
-            lock_acquire(get_filesys_lock());
-            struct file * file = f->page->mmappedfile;
-            off_t offset = f->page->mmapped_ofs;
-            size_t page_read_bytes = PGSIZE;
-            if (page_read_bytes < file_length(file) - offset)
-              page_read_bytes = file_length(file) - offset;
-            if (page_read_bytes != 0) {
-              file_seek(file, offset);
-              file_write(file, f->base, page_read_bytes);
+          if (f->page->from_executable) {
+	    // Case 1: The related page is from an executable.
+            if (!pagedir_is_dirty(t->pagedir, f->page->base)) {
+              pagedir_clear_page(t->pagedir, f->page->base);
+              f->page->swap = NULL;
+              f->page->frame = NULL;
+              f->page->loc = EXECUTABLE;
             }
-            lock_release(get_filesys_lock()); 
-	    f->page->swap = NULL;
-            f->page->frame = NULL;
-            f->page->loc = MMAP;
+	    else
+              swap_out(f->page);
           }
-          else
+          else if (f->page->is_mmapped) {
+	    // Case 2: The related page belongs to a mmap region.
+            if (pagedir_is_dirty(t->pagedir, f->page->base)) {
+              pagedir_set_dirty(t->pagedir, f->page->base, false);       
+              pagedir_clear_page(t->pagedir, f->page->base);
+              lock_acquire(get_filesys_lock());
+              struct file * file = f->page->mmappedfile;
+              off_t offset = f->page->mmapped_ofs;
+              size_t page_read_bytes = PGSIZE;
+              if (page_read_bytes < file_length(file) - offset)
+                page_read_bytes = file_length(file) - offset;
+              if (page_read_bytes != 0)
+                file_write_at(file, f->base, page_read_bytes, offset);
+              lock_release(get_filesys_lock()); 
+	      f->page->swap = NULL;
+              f->page->frame = NULL;
+              f->page->loc = MMAP;
+            }
+          }
+          else {
+	    // Case 3
             swap_out(f->page);
+          }
           sema_up(&f->page->page_sema);
           f->page = p;
           p->frame = f;

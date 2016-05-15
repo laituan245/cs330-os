@@ -168,7 +168,7 @@ page_fault (struct intr_frame *f)
       uintptr_t a = (uintptr_t) esp;
       uintptr_t b = (uintptr_t) fault_addr;
       uintptr_t c = (uintptr_t) thread_current()->data_segment_end;
-      if (b < PHYS_BASE && b > c && (a <= b || a - 4 == b || a - 32 == b)) {
+      if (b < PHYS_BASE && b > c && a - 32 <= b) {
         is_stack_access = true;
         stack_growth(fault_addr);
       }

@@ -80,10 +80,8 @@ void load_page(struct page * p) {
     struct frame  * frame = allocate_frame(p, PAL_USER | PAL_ZERO);
     uint8_t *kpage = frame->base;
 
-    if (p->page_read_bytes != 0) {
-      file_seek (thread_current()->executable, p->ofs);
-      file_read (thread_current()->executable, kpage, p->page_read_bytes);
-    }
+    if (p->page_read_bytes != 0)
+      file_read_at (thread_current()->executable, kpage, p->page_read_bytes, p->ofs);
 
     install_page (p->base, kpage, p->writable);
     p->loc = MEMORY;
@@ -98,10 +96,8 @@ void load_page(struct page * p) {
     size_t page_read_bytes = PGSIZE;
     if (page_read_bytes < file_length(file) - offset)
       page_read_bytes = file_length(file) - offset;
-    if (page_read_bytes != 0) {
-      file_seek (file, offset);
-      file_read (file, kpage, page_read_bytes);
-    }
+    if (page_read_bytes != 0)
+      file_read_at (file, kpage, page_read_bytes, offset);
 
     install_page (p->base, kpage, p->writable);
     p->loc = MEMORY;
@@ -121,10 +117,8 @@ void remove_mapping (struct page * p) {
       size_t page_read_bytes = PGSIZE;
       if (page_read_bytes < file_length(file) - offset)
         page_read_bytes = file_length(file) - offset;
-      if (page_read_bytes != 0) {
-        file_seek(file, offset);
-        file_write(file, p->frame->base, page_read_bytes);
-      }
+      if (page_read_bytes != 0)
+        file_write_at(file, p->frame->base, page_read_bytes, offset);
       lock_release(get_filesys_lock());
     }
   }
