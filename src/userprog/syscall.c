@@ -14,6 +14,8 @@
 #include "vm/frame.h"
 #include "devices/disk.h"
 
+typedef int mapid_t;
+
 struct file_info {
   int fd;
   tid_t tid;
@@ -21,11 +23,24 @@ struct file_info {
   struct list_elem elem;
 };
 
+struct file_mapping_info {
+  mapid_t mid;
+  struct file * file;
+  void * addr;
+  struct list_elem elem;
+};
+
 static struct list file_info_list;
+
+static struct list file_mapping_info_list;
 
 struct lock fd_lock;
 
+struct lock mid_lock;
+
 struct lock filesys_lock;
+
+struct lock mm_lock;
 
 static void syscall_handler (struct intr_frame *);
 
@@ -33,14 +48,19 @@ void
 syscall_init (void) 
 {
   lock_init(&fd_lock);
+  lock_init(&mid_lock);
+  lock_init(&mm_lock);
   list_init(&file_info_list);
+  list_init(&file_mapping_info_list);
   lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-static int
-allocate_fd (void)
-{
+struct lock * get_filesys_lock() {
+  return &filesys_lock;
+}
+
+static int allocate_fd (void) {
   static int next_fd = 2;
   int fd;
 
@@ -51,33 +71,48 @@ allocate_fd (void)
   return fd;
 }
 
+static mapid_t allocate_mid (void) {
+  static mapid_t next_mid = 1;
+  int mid;
+
+  lock_acquire (&mid_lock);
+  mid = next_mid++;
+  lock_release (&mid_lock);
+
+  return mid;
+}
+
+
+
+struct file * get_file (int fd) {
+  ASSERT(lock_held_by_current_thread (&filesys_lock));
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+  }
+  return myfile;
+}
 
 void terminate_process() {
   thread_current()->exit_status = -1;
   printf("%s: exit(%d)\n", thread_current()->name, -1);
-  if (!lock_held_by_current_thread(&filesys_lock))
-    lock_acquire(&filesys_lock);
   struct list_elem * e;
   struct file_info * tmp_info;
-  bool freedsth;
-  while(true) {
-    freedsth = false;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      tmp_info = list_entry(e, struct file_info, elem);
-      if (tmp_info->tid == thread_current()->tid) {
-        list_remove(&tmp_info->elem);
-        file_close(tmp_info->file_ptr);   
-        tmp_info->file_ptr = NULL;
-        free(tmp_info);
-        freedsth = true;
-        break;
-     }
-    }
-    if (!freedsth)
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->tid == thread_current()->tid) {
+      list_remove(&tmp_info->elem);
+      file_close(tmp_info->file_ptr);
+      tmp_info->file_ptr = NULL;
+      free(tmp_info);
       break;
+    }
   }
- 
-  lock_release(&filesys_lock);
   thread_exit();
 }
 
@@ -93,9 +128,11 @@ void pin_pages(void * buffer, unsigned size) {
       sema_down(&p->page_sema);
       if (p->frame != NULL)
         p->frame->pinned = true;
+      else {
+        load_page(p);
+        p->frame->pinned = true;
+      }
       sema_up(&p->page_sema);
-      if (p->frame == NULL)
-        swap_in(p);
     }
   }
 }
@@ -168,15 +205,7 @@ int write (void * esp) {
   }
   else  {
     lock_acquire(&filesys_lock);
-    struct file * myfile = NULL;
-    struct list_elem * e;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-        myfile = tmp_info -> file_ptr;
-        break;
-      }
-    }
+    struct file * myfile = get_file(fd);
     if (myfile == NULL) {
       lock_release(&filesys_lock);
       terminate_process();
@@ -217,15 +246,7 @@ int read (void * esp) {
     result = size;
   }
   else {
-    struct file * myfile = NULL;
-    struct list_elem * e;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) { 
-        myfile = tmp_info -> file_ptr;
-        break;
-      } 
-    }
+    struct file * myfile = get_file(fd);
     if (myfile == NULL) {
       lock_release(&filesys_lock);
       return -1;
@@ -247,15 +268,7 @@ void seek(void * esp) {
   unsigned position = * (unsigned *) (esp + 8);
   lock_acquire(&filesys_lock);
   unsigned result;
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-  }
+  struct file * myfile = get_file(fd);
   file_seek(myfile, position);
   lock_release(&filesys_lock);
 }
@@ -269,15 +282,7 @@ unsigned tell(void * esp) {
   int fd  = * (int *) (esp + 4);
   lock_acquire(&filesys_lock);
   unsigned result;
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-  }
+  struct file * myfile = get_file(fd);
   result = file_tell(myfile);
   lock_release(&filesys_lock);
   return result;
@@ -334,18 +339,7 @@ int filesize (void * esp) {
 
   int fd = * (int *) (esp + 4);
   lock_acquire(&filesys_lock);
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
-    
-    if (tmp_info->fd == fd) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-    
-  }
+  struct file * myfile = get_file(fd);
   if (myfile == NULL) {
     lock_release(&filesys_lock);
     return -1;
@@ -364,7 +358,6 @@ void exit (void * esp) {
   int status = * (int *) (esp + 4);
   thread_current()->exit_status = status;
   printf("%s: exit(%d)\n", thread_current()->name, status);
-  lock_acquire(&filesys_lock);  
   struct list_elem * e;
   struct file_info * tmp_info;
   bool freedsth;
@@ -384,9 +377,6 @@ void exit (void * esp) {
     if (!freedsth)
       break;
   }
-
-  lock_release(&filesys_lock);
-
   thread_exit();
 }
 
@@ -492,7 +482,111 @@ int open(void * esp) {
   return new_fd;
 }
 
+mapid_t mmap (void * esp) {
+  int i;
+  int argc = 2;
 
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd  = * (int *) (esp + 4);
+  void * addr = * (void **) (esp + 8);
+  if (fd == 0 || fd == 1)
+    return -1;
+
+  if ((uintptr_t) addr % PGSIZE != 0 || (uintptr_t) addr == 0)
+    return -1;
+
+  lock_acquire(&filesys_lock);
+  struct file * myfile = get_file(fd);
+  if (myfile == NULL) {
+    lock_release(&filesys_lock);
+    return -1;
+  }
+  int filelength = file_length(myfile);
+  if (filelength == 0)
+    return -1;
+
+  int nbofpages = filelength / PGSIZE;
+  if (filelength % PGSIZE > 0)
+    nbofpages++;
+
+  lock_acquire(&mm_lock);
+  enum intr_level old_level = intr_disable();
+  void * tmp_addr = addr;
+  for (i = 0; i < nbofpages; i++) {
+    if(find_page(tmp_addr)) {
+      lock_release(&mm_lock);
+      return -1;
+    }
+    tmp_addr += PGSIZE;
+  }
+
+  struct file * mappedfile = file_reopen(myfile);
+  off_t mmapped_ofs = 0;
+
+  tmp_addr = addr;
+  for (i = 0; i < nbofpages; i++) {
+    struct page * p = new_page(tmp_addr);
+    p->loc = MMAP;
+    p->mmappedfile = mappedfile;
+    p->mmapped_ofs = mmapped_ofs;
+    p->is_mmapped = true;
+    p->writable = true;
+    mmapped_ofs += PGSIZE;
+    sema_up(&p->page_sema);
+    tmp_addr += PGSIZE;
+  }
+
+  struct file_mapping_info * new_info = malloc(sizeof(struct file_mapping_info));
+  new_info->mid = allocate_mid();
+  new_info->file = mappedfile;
+  new_info->addr = addr;
+  list_push_back(&file_mapping_info_list, &new_info->elem);
+
+  intr_set_level(old_level);
+  lock_release(&filesys_lock);
+  lock_release(&mm_lock);
+  return new_info->mid;
+}
+
+void munmap(void * esp) {
+  int argc = 1;
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  lock_acquire(&mm_lock);
+  mapid_t mid  = * (mapid_t *) (esp + 4);
+  struct list_elem * e;
+  struct file_mapping_info * info = NULL;
+  for (e = list_begin(&file_mapping_info_list); e != list_end(&file_mapping_info_list); e = list_next(e)) {
+    info = list_entry(e, struct file_mapping_info, elem);
+    if (info->mid == mid) {
+      list_remove(&info->elem);
+      break;
+    }
+    info = NULL;
+  }
+  
+  if (info != NULL) {
+    void * tmp_addr = info->addr;
+    int filelength = file_length(info->file);
+    int nbofpages = filelength / PGSIZE;
+    if (filelength % PGSIZE > 0)
+      nbofpages++;
+    int i;
+    for (i = 0; i < nbofpages; i++) {
+      struct page * p = find_page(tmp_addr);
+      sema_down(&p->page_sema);
+      pagedir_clear_page(thread_current()->pagedir, p->base);
+      remove_mapping(p); 
+      sema_up(&p->page_sema);
+      free_page(thread_current()->pt, p);
+      tmp_addr += PGSIZE;
+    }
+  }
+  lock_release(&mm_lock);
+}
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -540,6 +634,12 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
     case SYS_CLOSE:                  /* Close a file. */
       close(f->esp);
+      break;
+    case SYS_MMAP:                   /* Map a file into memory. */
+      f->eax = mmap(f->esp);
+      break;
+    case SYS_MUNMAP:                 /* Remove a memory mapping. */
+      munmap(f->esp);
       break;
     default:
       terminate_process();

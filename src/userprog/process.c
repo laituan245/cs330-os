@@ -150,7 +150,6 @@ start_process (void * aux)
   new_info->child_tid = thread_current()->tid;
   sema_init(&new_info->sema,0);
   list_push_back(&relationship_list, &new_info->elem);
-
   sema_up(sema);
   *loaded = true;
   /* Start the user process by simulating a return from an
@@ -193,7 +192,7 @@ process_wait (tid_t child_tid UNUSED)
   if (!found)
     return -1;
   
-  sema_down(&rls_info->sema); 
+  sema_down(&rls_info->sema);
   for (e = list_begin(&exit_info_list); e != list_end(&exit_info_list); e = list_next(e)) {
     struct exit_info * info = list_entry(e, struct exit_info, elem);
     if (info->tid == child_tid) {
@@ -216,12 +215,17 @@ process_exit (void)
   uint32_t *pd;
 
   // Let's free resources
+  file_close(thread_current()->executable);
   struct hash * pt = curr->pt;
   struct hash_iterator i;
   while (true) {
     hash_first (&i, pt);
     if (hash_next (&i)) {
       struct page *p = hash_entry (hash_cur (&i), struct page, hash_elem);
+      sema_down(&p->page_sema);
+      if (p->is_mmapped)
+        remove_mapping(p);
+      sema_up(&p->page_sema);
       free_page(pt, p);
     }
     else
@@ -253,7 +257,6 @@ process_exit (void)
         }
       palloc_free_page (pd);
     }
- 
   enum intr_level old_level = intr_disable();
   struct exit_info * new_info = malloc(12);
   new_info->status = curr->exit_status;
@@ -264,7 +267,7 @@ process_exit (void)
   struct list_elem * e; 
   for (e = list_begin(&relationship_list); e != list_end(&relationship_list); e = list_next(e)) {
     struct relationship_info * rls_info = list_entry(e, struct relationship_info, elem);
-    if (rls_info->child_tid == thread_current()->tid) {
+   if (rls_info->child_tid == curr->tid) {
       parent_process_exited = false;
       sema_up(&rls_info->sema);
       break;
@@ -401,6 +404,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   file = filesys_open (file_name);
+  thread_current()->executable = file;
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -490,7 +494,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
@@ -573,29 +576,15 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       /* Get a page of memory. */
       struct page * page = new_page(upage);
-      struct frame * frame = allocate_frame(page, PAL_USER);
-      uint8_t *kpage = frame->base;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          sema_up(&page->page_sema);
-          free_page (thread_current()->pt, page);
-          return false;
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          sema_up(&page->page_sema);
-          free_page(thread_current()->pt, page);
-          return false; 
-        }
+      page->loc = EXECUTABLE;
+      page->ofs = ofs;
+      page->page_read_bytes = page_read_bytes;
       page->writable = writable;
+      page->from_executable = true;
       sema_up(&page->page_sema);
 
       /* Advance. */
+      ofs += PGSIZE;
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;

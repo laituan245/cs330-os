@@ -10,8 +10,6 @@
 #include "vm/page.h"
 #include "vm/swap.h"
 
-static struct lock pf_handler_lock;
-
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -36,7 +34,6 @@ static void page_fault (struct intr_frame *);
 void
 exception_init (void) 
 {
-  lock_init(&pf_handler_lock);
   /* These exceptions can be raised explicitly by a user program,
      e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
      we set DPL==3, meaning that user programs are allowed to
@@ -156,10 +153,6 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
     
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-
   // printf ("Page fault at %p: %s error %s page in %s context.\n",
   //        fault_addr,
   //        not_present ? "not present" : "rights violation",
@@ -175,20 +168,18 @@ page_fault (struct intr_frame *f)
       uintptr_t a = (uintptr_t) esp;
       uintptr_t b = (uintptr_t) fault_addr;
       uintptr_t c = (uintptr_t) thread_current()->data_segment_end;
-      if (b < PHYS_BASE && b > c && (a <= b || a - 4 == b || a - 32 == b)) {
+      if (b < PHYS_BASE && b > c && a - 32 <= b) {
         is_stack_access = true;
-        lock_acquire(&pf_handler_lock);
         stack_growth(fault_addr);
-        lock_release(&pf_handler_lock);
       }
     }
     if (!is_stack_access)
       exit(-1);
   }
   else {
-    lock_acquire(&pf_handler_lock);
-    swap_in(p);
-    lock_release(&pf_handler_lock);
+    sema_down(&p->page_sema);
+    load_page(p);
+    sema_up(&p->page_sema);
   }
 }
 
