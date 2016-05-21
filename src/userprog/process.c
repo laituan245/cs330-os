@@ -602,7 +602,9 @@ setup_stack (void **esp)
   bool success = false;
   
   struct page * page = new_page(((uint8_t *) PHYS_BASE) - PGSIZE);
+  sema_down(get_frame_table_sema());
   struct frame * frame = allocate_frame(page, PAL_USER | PAL_ZERO);
+  sema_up(get_frame_table_sema());
   kpage = frame->base;
   success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
   if (success) {
