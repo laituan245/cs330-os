@@ -16,5 +16,6 @@ struct frame {
 void frame_table_init();
 struct frame * allocate_frame(struct page *, enum palloc_flags);
 void free_frame(struct frame *);
+struct semaphore * get_frame_table_sema();
 
 #endif

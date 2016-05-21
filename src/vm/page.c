@@ -1,4 +1,5 @@
 #include "vm/page.h"
+#include "vm/frame.h"
 #include "userprog/syscall.h"
 #include "filesys/file.h"
 #include "threads/thread.h"
@@ -65,7 +66,9 @@ struct page * find_page(void * base) {
 
 void stack_growth(void * addr) {
    struct page * p = new_page(pg_round_down(addr));
-   struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);     
+   sema_down(get_frame_table_sema());
+   struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
+   sema_up(get_frame_table_sema());
    install_page(p->base, p->frame->base, true);
    p->loc = MEMORY;
    sema_up(&p->page_sema);
@@ -77,7 +80,9 @@ void load_page(struct page * p) {
     swap_in(p);
   else if (p->loc == EXECUTABLE) {
     lock_acquire(get_filesys_lock());
+    sema_down(get_frame_table_sema());
     struct frame  * frame = allocate_frame(p, PAL_USER | PAL_ZERO);
+    sema_up(get_frame_table_sema());
     uint8_t *kpage = frame->base;
 
     if (p->page_read_bytes != 0)
@@ -89,7 +94,9 @@ void load_page(struct page * p) {
   }
   else if (p->loc == MMAP) {
     lock_acquire(get_filesys_lock());
+    sema_down(get_frame_table_sema());
     struct frame  * frame = allocate_frame(p, PAL_USER | PAL_ZERO);
+    sema_up(get_frame_table_sema());
     uint8_t *kpage = frame->base;
     struct file * file = p->mmappedfile;
     off_t offset = p->mmapped_ofs;

@@ -56,7 +56,9 @@ void swap_in(struct page *p) {
   int j;
   struct disk * sdisk = disk_get(1, 1);
   struct swap * s = p->swap;
+  sema_down(get_frame_table_sema());
   struct frame * f = allocate_frame(p, PAL_USER | PAL_ZERO);
+  sema_up(get_frame_table_sema());
   install_page(p->base, p->frame->base, true);
   lock_acquire(&swap_disk_lock);
   for (j = 0; j < SECTORS_PER_SWAP; j++)

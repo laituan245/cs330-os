@@ -24,7 +24,6 @@ void move_cur_ptr(){
 struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
   ASSERT(flags & PAL_USER);
   int j;
-  sema_down(&sema);
   struct frame * f = malloc(sizeof (struct frame));
   f->base = palloc_get_page(flags);
   if (f->base == NULL) {
@@ -98,7 +97,6 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
       list_insert(cur,&f->elem);
   }
   p->loc = MEMORY;
-  sema_up(&sema);
   return f;
 }
 
@@ -118,4 +116,8 @@ void free_frame(struct frame * f) {
     free(f);
   }
   sema_up(&sema);
+}
+
+struct semaphore * get_frame_table_sema() {
+  return &sema;
 }
