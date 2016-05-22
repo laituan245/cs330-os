@@ -58,7 +58,7 @@ struct frame * allocate_frame(struct page * p, enum palloc_flags flags){
               struct file * file = f->page->mmappedfile;
               off_t offset = f->page->mmapped_ofs;
               size_t page_read_bytes = PGSIZE;
-              if (page_read_bytes < file_length(file) - offset)
+              if (page_read_bytes > file_length(file) - offset)
                 page_read_bytes = file_length(file) - offset;
               if (page_read_bytes != 0)
                 file_write_at(file, f->base, page_read_bytes, offset);
