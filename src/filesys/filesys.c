@@ -6,6 +6,7 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "filesys/cache.h"
 #include "devices/disk.h"
 
 /* The disk that contains the file system. */
@@ -37,6 +38,7 @@ void
 filesys_done (void) 
 {
   free_map_close ();
+  flush();
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
