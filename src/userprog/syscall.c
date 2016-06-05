@@ -207,6 +207,29 @@ void seek(void * esp) {
   sema_up(&filesys_sema);
 }
 
+unsigned tell(void * esp) {
+  int argc = 1;
+
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd  = * (int *) (esp + 4);
+  sema_down(&filesys_sema);
+  unsigned result;
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
+    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+  }
+  result = file_tell(myfile);
+  sema_up(&filesys_sema);
+  return result;
+}
+
 void close(void * esp) {
   int argc = 1;
   
@@ -460,6 +483,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       seek(f->esp);
       break;
     case SYS_TELL:                   /* Report current position in a file. */
+      f->eax = tell(f->esp);
       break;
     case SYS_CLOSE:                  /* Close a file. */
       close(f->esp);
