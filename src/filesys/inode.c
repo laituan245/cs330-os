@@ -7,6 +7,7 @@
 #include "filesys/free-map.h"
 #include "filesys/cache.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -38,6 +39,7 @@ struct inode
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
     struct inode_disk data;             /* Inode content. */
+    struct semaphore file_growth_sema;
   };
 
 /* Returns the disk sector that contains byte offset POS within
@@ -166,6 +168,7 @@ inode_open (disk_sector_t sector)
   inode->deny_write_cnt = 0;
   inode->removed = false;
   read_sector (inode->sector, 0, &inode->data, DISK_SECTOR_SIZE);
+  sema_init(&inode->file_growth_sema, 1);
   return inode;
 }
 
@@ -191,7 +194,7 @@ inode_get_inumber (const struct inode *inode)
 void
 inode_close (struct inode *inode) 
 {
-  int i;
+  uint32_t i;
   /* Ignore null pointer. */
   if (inode == NULL)
     return;
@@ -266,6 +269,45 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   return bytes_read;
 }
 
+/* File growth.
+   Returns true if the operation is successful.
+   Returns false otherwise */
+bool file_growth(struct inode *inode, size_t old_nbsectors, size_t new_nbsectors) {
+  uint32_t i, j;
+  bool success = false;
+  disk_sector_t tmp, direct, indirect;
+  static char zeros[DISK_SECTOR_SIZE];
+  if (old_nbsectors % 128)
+    read_sector(inode->data.doubly_indirect, 4 * (old_nbsectors / 128), &indirect, 4);
+  for (i = old_nbsectors; i < new_nbsectors; i++) {
+    if (!free_map_allocate(1, &tmp))
+      break;
+    else {
+      disk_write(filesys_disk, tmp, zeros);
+      if (i % 128 == 0) {
+        if (!free_map_allocate(1, &indirect)) {
+          free_map_release(tmp, 1);
+          break;
+        }
+        write_sector(inode->data.doubly_indirect, 4 * (i / 128), &indirect, 4);
+      }
+      write_sector(indirect, 4 * (i % 128), &tmp, 4);
+    }
+  }
+  if (i == new_nbsectors)
+    success = true;
+  else {
+    for (j = old_nbsectors; j < i; j++) {
+      read_sector(inode->data.doubly_indirect, 4 * (j / 128), &indirect, 4);
+      read_sector(indirect, 4 * (j % 128), &direct, 4);
+      free_map_release(direct, 1);
+      if (j == i - 1 || j % 128 == 127 || !(old_nbsectors % 128 > 0 && old_nbsectors / 128 == j / 128))
+        free_map_release(indirect, 1);
+    }
+  }
+  return success;
+}
+
 /* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET.
    Returns the number of bytes actually written, which may be
    less than SIZE if end of file is reached or an error occurs.
@@ -280,6 +322,21 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 
   if (inode->deny_write_cnt)
     return 0;
+
+  sema_down(&inode->file_growth_sema);
+  if (size + offset > inode->data.length) {
+    // Need to grow the file
+    size_t old_nbsectors = bytes_to_sectors(inode->data.length);
+    size_t new_nbsectors = bytes_to_sectors(size + offset);
+    bool success = file_growth(inode, old_nbsectors, new_nbsectors);
+    if (!success) {
+      sema_up(&inode->file_growth_sema);
+      return 0;
+    }
+    inode->data.length = size + offset;
+    write_sector(inode->sector, 0, &inode->data, DISK_SECTOR_SIZE);
+  }
+  sema_up(&inode->file_growth_sema);
 
   while (size > 0) 
     {
