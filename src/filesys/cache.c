@@ -8,17 +8,18 @@ static struct lock cache_lock;
 static struct list sectors_list;
 static int count;
 
-static void thread_function();
+struct cached_sector * load_sector(disk_sector_t);
+static void flush_periodically();
 void flush();
 
 void buffer_cache_init() {
   list_init(&sectors_list);
   lock_init(&cache_lock);
   count = 0;
-  thread_create("periodical_write_behind", PRI_DEFAULT, thread_function, NULL);
+  thread_create("flush_periodically", PRI_DEFAULT, flush_periodically, NULL);
 }
 
-static void thread_function(){
+static void flush_periodically(){
   while(true) {
     timer_sleep(10);
     flush();
@@ -52,12 +53,13 @@ struct cached_sector * get_sector(disk_sector_t sector_idx) {
       break;
     }
   }
+  if (rs == NULL)
+    rs = load_sector(sector_idx);
   lock_release(&cache_lock);
   return rs;
 }
 
 struct cached_sector * load_sector(disk_sector_t sector_idx) {
-  lock_acquire(&cache_lock);
   struct cached_sector * rs = NULL;
   if (count < 64) {
     rs = malloc(sizeof (struct cached_sector));
@@ -89,17 +91,13 @@ struct cached_sector * load_sector(disk_sector_t sector_idx) {
     disk_read(filesys_disk, rs->sector_idx, rs->data);
     list_push_back(&sectors_list, &rs->elem);
   }
-  lock_release(&cache_lock);
   return rs;
 }
 
 bool write_sector(disk_sector_t sector_idx, off_t sector_ofs, void * buffer, off_t size) {
   struct cached_sector * s = get_sector(sector_idx);
-  if (s == NULL) {
-    s = load_sector(sector_idx);
-    if (s == NULL)
-      return false;
-  }
+  if (s == NULL)
+    return false;
   memcpy (s->data + sector_ofs, buffer, size);
   sema_up(&s->sema);
   s->dirty = true;
@@ -108,11 +106,8 @@ bool write_sector(disk_sector_t sector_idx, off_t sector_ofs, void * buffer, off
 
 bool read_sector(disk_sector_t sector_idx, off_t sector_ofs, void * buffer, off_t size) {
   struct cached_sector * s = get_sector(sector_idx);
-  if (s == NULL) {                                                     
-    s = load_sector(sector_idx);
-    if (s == NULL)
-      return false;
-  }
+  if (s == NULL)
+    return false;
   memcpy (buffer, s->data + sector_ofs, size);
   sema_up(&s->sema);
   return true;
