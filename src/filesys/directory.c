@@ -46,7 +46,13 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
   saved = path;
   for (token = strtok_r (path, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
     saved = token;
-    if (strcmp(token, ".") == 0) {
+    if (strcmp(token, "..") == 0) {
+      struct inode * tmp_inode = inode_open(dir_get_inode(cur)->data.parent);
+      struct dir * parent_dir = dir_open(tmp_inode);
+      dir_close(cur);
+      cur = parent_dir;
+    }
+    else if (strcmp(token, ".") == 0) {
     }
     else if (!dir_lookup(cur, token, &inode))
       break;
@@ -79,7 +85,7 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
     disk_sector_t inode_sector = 0;
     success = (cur != NULL
                     && free_map_allocate (1, &inode_sector)
-                    && inode_create (inode_sector, initial_size, 0)
+                    && inode_create (inode_sector, initial_size, 0, dir_get_inode(cur)->sector)
                     && dir_add (cur, token, inode_sector));
     if (!success && inode_sector != 0)
       free_map_release (inode_sector, 1);
@@ -89,7 +95,7 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
     disk_sector_t inode_sector = 0;
     success = (cur != NULL
                     && free_map_allocate (1, &inode_sector)
-                    && dir_create(inode_sector, 16)
+                    && dir_create(inode_sector, 16, dir_get_inode(cur)->sector)
                     && dir_add (cur, token, inode_sector));
     if (!success && inode_sector != 0)
       free_map_release (inode_sector, 1);
@@ -112,11 +118,14 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
     // remove a file or a directory
     token = saved;
     if (inode->data.is_dir) {
+      struct inode * tmp_inode = inode_open(dir_get_inode(cur)->data.parent);
+      struct dir * tmp_dir = dir_open(tmp_inode);
       char tmp_buffer[20];
       if (dir_readdir (cur, tmp_buffer))
         success = false;
       else
-        success = dir_remove (cur, token);
+        success = dir_remove (tmp_dir, token);
+      dir_close(tmp_dir);
     }
     else
       success = dir_remove (cur, token);
@@ -128,9 +137,9 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
 bool
-dir_create (disk_sector_t sector, size_t entry_cnt) 
+dir_create (disk_sector_t sector, size_t entry_cnt, disk_sector_t parent)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry), 1);
+  return inode_create (sector, entry_cnt * sizeof (struct dir_entry), 1, parent);
 }
 
 /* Opens and returns the directory for the given INODE, of which

@@ -12,7 +12,7 @@
 struct inode_disk
   {
     int is_dir;                         /* 1 if dir. 0 if not dir */
-    disk_sector_t parent_dir;
+    disk_sector_t parent;
     disk_sector_t doubly_indirect;
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
@@ -34,7 +34,7 @@ struct inode
 struct bitmap;
 
 void inode_init (void);
-bool inode_create (disk_sector_t, off_t, int);
+bool inode_create (disk_sector_t, off_t, int, disk_sector_t);
 struct inode *inode_open (disk_sector_t);
 struct inode *inode_reopen (struct inode *);
 disk_sector_t inode_get_inumber (const struct inode *);

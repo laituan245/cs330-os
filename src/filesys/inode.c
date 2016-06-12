@@ -54,7 +54,7 @@ inode_init (void)
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (disk_sector_t sector, off_t length, int is_dir)
+inode_create (disk_sector_t sector, off_t length, int is_dir, disk_sector_t parent)
 {
   uint32_t i, j;
   disk_sector_t tmp, indirect;
@@ -74,6 +74,7 @@ inode_create (disk_sector_t sector, off_t length, int is_dir)
       size_t sectors = bytes_to_sectors (length);
       disk_inode->is_dir = is_dir;
       disk_inode->length = length;
+      disk_inode->parent = parent;
       disk_inode->magic = INODE_MAGIC;
       if (free_map_allocate(1, &disk_inode->doubly_indirect)) {
         for (i = 0; i < sectors; i++) {
