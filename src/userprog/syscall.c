@@ -372,7 +372,7 @@ bool create(void * esp) {
   
   unsigned initial_size = * (unsigned *) (esp + 8);
   sema_down(&filesys_sema);
-  bool result = filesys_create (file_copy, initial_size);
+  bool result = traverse_path(file_copy, 0, &initial_size, NULL);
   sema_up(&filesys_sema);
 
   palloc_free_page(file_copy);
