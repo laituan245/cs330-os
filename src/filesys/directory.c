@@ -96,7 +96,7 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
   else if (action_type == 3) {
     // change the current directory of process
     if (inode->data.is_dir) {
-      * (disk_sector_t *) rs = inode->sector;
+      thread_current()->cur_dir = dir_reopen(cur);
       success = true;
     }
     else
@@ -107,7 +107,6 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
     success = dir_remove (cur, token);
   }
   dir_close(cur);
-  inode_close(inode);
   return success;
 }
 
