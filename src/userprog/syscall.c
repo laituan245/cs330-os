@@ -396,7 +396,7 @@ bool remove(void * esp) {
   strlcpy (file_copy, file, PGSIZE);
 
   sema_down(&filesys_sema);
-  bool result = filesys_remove (file_copy);
+  bool result = traverse_path(file_copy, 4, NULL, NULL);
   sema_up(&filesys_sema);
 
   palloc_free_page(file_copy);

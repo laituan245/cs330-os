@@ -33,16 +33,22 @@ struct dir_entry
    aux contains auxiliary input data (if any)
    rs is used for returning some output data to the caller */
 bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
-  char * token, save_ptr;
-  struct inode * inode = NULL;
+  char * token, * saved, save_ptr;
+  struct inode * inode;
   struct dir * cur;
+  if (strlen(path) == 0)
+    return false;
   if (path[0] == '/')
     cur = dir_open_root(); // Absolute path
   else
     cur = dir_reopen(thread_current()->cur_dir); // Relative path
-
+  inode = cur->inode;
+  saved = path;
   for (token = strtok_r (path, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
-    if (!dir_lookup(cur, token, &inode))
+    saved = token;
+    if (strcmp(token, ".") == 0) {
+    }
+    else if (!dir_lookup(cur, token, &inode))
       break;
     else {
       if (inode->data.is_dir) {
@@ -104,7 +110,16 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
   }
   else if (action_type == 4) {
     // remove a file or a directory
-    success = dir_remove (cur, token);
+    token = saved;
+    if (inode->data.is_dir) {
+      char tmp_buffer[20];
+      if (dir_readdir (cur, tmp_buffer))
+        success = false;
+      else
+        success = dir_remove (cur, token);
+    }
+    else
+      success = dir_remove (cur, token);
   }
   dir_close(cur);
   return success;

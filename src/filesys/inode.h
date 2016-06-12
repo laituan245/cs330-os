@@ -12,10 +12,11 @@
 struct inode_disk
   {
     int is_dir;                         /* 1 if dir. 0 if not dir */
+    disk_sector_t parent_dir;
     disk_sector_t doubly_indirect;
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[124];               /* Not used. */
+    uint32_t unused[123];               /* Not used. */
   };
 
 /* In-memory inode. */
