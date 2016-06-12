@@ -13,6 +13,8 @@
 
 struct inode;
 
+bool traverse_path(const char *, int, void *, void *);
+
 /* Opening and closing directories. */
 bool dir_create (disk_sector_t sector, size_t entry_cnt);
 struct dir *dir_open (struct inode *);

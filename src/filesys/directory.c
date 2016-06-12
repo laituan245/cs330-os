@@ -4,7 +4,10 @@
 #include <list.h>
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
+#include "threads/thread.h"
 #include "threads/malloc.h"
+#include "threads/palloc.h"
+#include "threads/vaddr.h"
 
 /* A directory. */
 struct dir 
@@ -20,6 +23,93 @@ struct dir_entry
     char name[NAME_MAX + 1];            /* Null terminated file name. */
     bool in_use;                        /* In use or free? */
   };
+
+/* Traverse a path and do some specific action at the end
+   + action_type = 0 => create a new file
+   + action_type = 1 => make a new directory
+   + action_type = 2 => open a file or a directory
+   + action_type = 3 => change the current directory of process
+   + action_type = 4 => remove a file or a directory
+   aux contains auxiliary input data (if any)
+   rs is used for returning some output data to the caller */
+bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
+  char * token, save_ptr;
+  struct inode * inode = NULL;
+  struct dir * cur;
+  if (path[0] == '/')
+    cur = dir_open_root(); // Absolute path
+  else
+    cur = dir_reopen(thread_current()->cur_dir); // Relative path
+
+  for (token = strtok_r (path, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
+    if (!dir_lookup(cur, token, &inode))
+      break;
+    else {
+      if (inode->data.is_dir) {
+        dir_close(cur);
+        cur = dir_open(inode);
+      }
+      else {
+        token = strtok_r (NULL, "/", &save_ptr);
+        break;
+      }
+    }
+  }
+
+  if ((action_type > 1 && inode == NULL) || (action_type < 2 && inode != NULL)) {
+    dir_close(cur);
+    return false;
+  }
+
+  if ((action_type > 1 && token != NULL) || (action_type < 2 && token == NULL)) {
+    dir_close(cur);
+    return false;
+  }
+
+  bool success = false;
+  if (action_type == 0) {
+    // create a new file
+    off_t initial_size = * (off_t *) aux;
+    disk_sector_t inode_sector = 0;
+    success = (cur != NULL
+                    && free_map_allocate (1, &inode_sector)
+                    && inode_create (inode_sector, initial_size, 0)
+                    && dir_add (cur, token, inode_sector));
+    if (!success && inode_sector != 0)
+      free_map_release (inode_sector, 1);
+  }
+  else if (action_type == 1) {
+    // make a new directory
+    disk_sector_t inode_sector = 0;
+    success = (cur != NULL
+                    && free_map_allocate (1, &inode_sector)
+                    && dir_create(inode_sector, 16)
+                    && dir_add (cur, token, inode_sector));
+    if (!success && inode_sector != 0)
+      free_map_release (inode_sector, 1);
+  }
+  else if (action_type == 2) {
+    // open a file or a directory
+    * (disk_sector_t *) rs = inode->sector;
+    success = true;
+  }
+  else if (action_type == 3) {
+    // change the current directory of process
+    if (inode->data.is_dir) {
+      * (disk_sector_t *) rs = inode->sector;
+      success = true;
+    }
+    else
+      success = false;
+  }
+  else if (action_type == 4) {
+    // remove a file or a directory
+    success = dir_remove (cur, token);
+  }
+  dir_close(cur);
+  inode_close(inode);
+  return success;
+}
 
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
