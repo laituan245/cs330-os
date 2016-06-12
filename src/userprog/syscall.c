@@ -548,7 +548,10 @@ int inumber(void * esp) {
   for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
     struct open_info * tmp_info = list_entry(e, struct open_info, elem);
     if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      result = dir_get_inode(tmp_info->dir_ptr)->sector;
+      if (tmp_info->dir_ptr != NULL)
+        result = dir_get_inode(tmp_info->dir_ptr)->sector;
+      else if (tmp_info->file_ptr != NULL)
+        result = file_get_inode(tmp_info->file_ptr)->sector;
     }
   }
   sema_up(&filesys_sema);
