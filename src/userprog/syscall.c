@@ -470,7 +470,27 @@ int open(void * esp) {
   return new_fd;
 }
 
+bool mkdir(void * esp) {
+  int argc = 1;
 
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  char * dir  = * (char * *) (esp + 4);
+
+  if (!is_valid(dir))
+    terminate_process();
+
+  char * dir_copy  = palloc_get_page (0);
+  if (dir_copy == NULL)
+    return -1;
+  strlcpy (dir_copy, dir, PGSIZE);
+  sema_down(&filesys_sema);
+  bool rs = traverse_path(dir_copy, 1, NULL, NULL);
+  sema_up(&filesys_sema);
+  palloc_free_page(dir_copy);
+  return rs;
+}
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -522,6 +542,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CHDIR:                  /* Change the current directory. */
       break;
     case SYS_MKDIR:                  /* Create a directory. */
+      f->eax = mkdir(f->esp);
       break;
     case SYS_READDIR:                /* Reads a directory entry. */
       break;
