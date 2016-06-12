@@ -555,6 +555,31 @@ int inumber(void * esp) {
   return result;
 }
 
+bool readdir(void * esp) {
+  int argc = 2;
+
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd = * (int *) (esp + 4);
+  char * name = * (char **) (esp + 8);
+
+  if (!is_valid(name))
+    terminate_process();
+
+  bool result = false;
+  sema_down(&filesys_sema);
+  struct list_elem * e;
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid && tmp_info->dir_ptr != NULL) {
+      result = dir_readdir(tmp_info->dir_ptr, name);
+      break;
+    }
+  }
+  sema_up(&filesys_sema);
+  return result;
+}
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -610,6 +635,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = mkdir(f->esp);
       break;
     case SYS_READDIR:                /* Reads a directory entry. */
+      f->eax = readdir(f->esp);
       break;
     case SYS_ISDIR:                  /* Tests if a fd represents a directory. */
       f->eax = isdir(f->esp);
