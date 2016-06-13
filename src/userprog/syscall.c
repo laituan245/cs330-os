@@ -248,13 +248,15 @@ void close(void * esp) {
   for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
     struct open_info * tmp_info = list_entry(e, struct open_info, elem);
     if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
+      if (tmp_info->file_ptr)
+        file_close(tmp_info->file_ptr);
+      else
+        dir_close(tmp_info->dir_ptr);
       list_remove(&tmp_info->elem);
       free(tmp_info);
       break;
     }
   }
-  file_close(myfile);
   sema_up(&filesys_sema);
 }
 
@@ -483,7 +485,7 @@ bool mkdir(void * esp) {
 
   char * dir_copy  = palloc_get_page (0);
   if (dir_copy == NULL)
-    return -1;
+    return false;
   strlcpy (dir_copy, dir, PGSIZE);
   sema_down(&filesys_sema);
   bool rs = traverse_path(dir_copy, 1, NULL, NULL);
