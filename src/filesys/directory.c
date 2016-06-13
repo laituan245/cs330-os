@@ -42,6 +42,8 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
     cur = dir_open_root(); // Absolute path
   else
     cur = dir_reopen(thread_current()->cur_dir); // Relative path
+  if (cur == NULL)
+    return false;
   inode = cur->inode;
   saved = path;
   for (token = strtok_r (path, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
@@ -51,8 +53,15 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
       struct dir * parent_dir = dir_open(tmp_inode);
       dir_close(cur);
       cur = parent_dir;
+      if (cur == NULL)
+        return false;
     }
     else if (strcmp(token, ".") == 0) {
+      struct dir * cur_dir = dir_reopen(cur);
+      dir_close(cur);
+      cur = cur_dir;
+      if (cur == NULL)
+        return false;
     }
     else if (!dir_lookup(cur, token, &inode))
       break;
@@ -60,6 +69,8 @@ bool traverse_path(const char * path, int action_type, void * aux, void * rs) {
       if (inode->data.is_dir) {
         dir_close(cur);
         cur = dir_open(inode);
+        if (cur == NULL)
+          return false;
       }
       else {
         token = strtok_r (NULL, "/", &save_ptr);
@@ -147,6 +158,8 @@ dir_create (disk_sector_t sector, size_t entry_cnt, disk_sector_t parent)
 struct dir *
 dir_open (struct inode *inode) 
 {
+  if (inode->removed)
+    return false;
   struct dir *dir = calloc (1, sizeof *dir);
   if (inode != NULL && dir != NULL)
     {
