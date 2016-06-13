@@ -8,17 +8,17 @@ static struct lock cache_lock;
 static struct list sectors_list;
 static int count;
 
-static void thread_function();
+static void flush_periodically();
 void flush();
 
 void buffer_cache_init() {
   list_init(&sectors_list);
   lock_init(&cache_lock);
   count = 0;
-  thread_create("periodical_write_behind", PRI_DEFAULT, thread_function, NULL);
+  thread_create("periodical_write_behind", PRI_DEFAULT, flush_periodically, NULL);
 }
 
-static void thread_function(){
+static void flush_periodically(){
   while(true) {
     timer_sleep(10);
     flush();
