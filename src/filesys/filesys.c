@@ -106,7 +106,10 @@ do_format (void)
   printf ("done.\n");
 }
 
-bool traverse_path(char * path, disk_sector_t * sector, char ** name) {
+/* action_type = 0 => do nothing
+   action_type = 1 => create a new file
+   action_type = 2 => make a new directory */
+bool traverse_path(char * path, disk_sector_t * sector, char ** name, int action_type, void * aux) {
   char * token, *saved, *path_copy, save_ptr;
   struct inode * inode;
   struct dir * cur;
@@ -128,9 +131,38 @@ bool traverse_path(char * path, disk_sector_t * sector, char ** name) {
   for (token = strtok_r (path_copy, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
     saved = token;
     if (!dir_lookup(cur, token, &inode)) {
-      dir_close(cur);
-      palloc_free_page(path_copy);
-      return false;
+      if (action_type == 0) {
+        dir_close(cur);
+        palloc_free_page(path_copy);
+        return false;
+      }
+      else if (action_type == 1) {
+        // create a new file
+        off_t initial_size = * (off_t *) aux;
+        disk_sector_t inode_sector = 0;
+        bool success = (cur != NULL
+                    && free_map_allocate (1, &inode_sector)
+                    && inode_create (inode_sector, initial_size, 0, dir_get_inode(cur)->sector)
+                    && dir_add (cur, token, inode_sector));
+        if (!success && inode_sector != 0)
+          free_map_release (inode_sector, 1);
+        dir_close(cur);
+        palloc_free_page(path_copy);
+        return success;
+      }
+      else if (action_type == 2) {
+        // make a new directory
+        disk_sector_t inode_sector = 0;
+        bool success = (cur != NULL
+                       && free_map_allocate (1, &inode_sector)
+                       && dir_create(inode_sector, 16, dir_get_inode(cur)->sector)
+                       && dir_add (cur, token, inode_sector));
+        if (!success && inode_sector != 0)
+          free_map_release (inode_sector, 1);
+        dir_close(cur);
+        palloc_free_page(path_copy);
+        return success;
+      }
     }
     else {
       dir_close(cur);
@@ -172,5 +204,7 @@ bool traverse_path(char * path, disk_sector_t * sector, char ** name) {
    strlcpy(* name, saved, PGSIZE);                                  
   }
   palloc_free_page(path_copy);
+  if (action_type > 0)
+    return false;
   return true;
 }

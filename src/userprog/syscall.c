@@ -357,23 +357,17 @@ bool create(void * esp) {
   if (!are_args_locations_valid(esp, argc))
     terminate_process();
 
-  char * file  = * (char * *) (esp + 4);
+  char * path  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(path))
     terminate_process();
-
-  char * file_copy  = palloc_get_page (0);
-  if (file_copy == NULL)
-    return false;
-  strlcpy (file_copy, file, PGSIZE);
   
   unsigned initial_size = * (unsigned *) (esp + 8);
   sema_down(&filesys_sema);
-  struct dir * root_dir = dir_open_root();
-  bool result = filesys_create (root_dir, file_copy, initial_size, 0);
+  disk_sector_t sector;
+  bool result = traverse_path(path, &sector, NULL, 1, &initial_size);
   sema_up(&filesys_sema);
 
-  palloc_free_page(file_copy);
   return result;
 }
 
@@ -391,7 +385,7 @@ bool remove(void * esp) {
   sema_down(&filesys_sema);
   char * name;
   disk_sector_t sector;
-  if (!traverse_path(path, &sector, &name)) {
+  if (!traverse_path(path, &sector, &name, 0, NULL)) {
     sema_up(&filesys_sema);
     return false;
   }
@@ -456,7 +450,7 @@ int open(void * esp) {
   sema_down(&filesys_sema);
   disk_sector_t sector;
   char * name;
-  if (!traverse_path(path, &sector, &name)) {
+  if (!traverse_path(path, &sector, &name, 0, NULL)) {
     sema_up(&filesys_sema);
     return -1;
   }
@@ -581,6 +575,29 @@ bool readdir(void * esp) {
   return result;
 }
 
+bool mkdir(void * esp) {
+   int argc = 1;
+
+   if (!are_args_locations_valid(esp, argc))
+     terminate_process();
+
+   char * dir  = * (char * *) (esp + 4);
+
+   if (!is_valid(dir))
+     terminate_process();
+
+   char * dir_copy  = palloc_get_page (0);
+   if (dir_copy == NULL)
+     return -1;
+   strlcpy (dir_copy, dir, PGSIZE);
+   sema_down(&filesys_sema);
+   disk_sector_t sector;
+   bool rs = traverse_path(dir_copy, sector, NULL, 2, NULL);
+   sema_up(&filesys_sema);
+   palloc_free_page(dir_copy);
+   return rs;
+}
+
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
@@ -631,6 +648,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CHDIR:                  /* Change the current directory. */
       break;
     case SYS_MKDIR:                  /* Create a directory. */
+      f->eax = mkdir(f->esp);
       break;
     case SYS_READDIR:                /* Reads a directory entry. */
       f->eax = readdir(f->esp);
