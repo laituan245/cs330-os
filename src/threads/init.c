@@ -34,6 +34,7 @@
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
 #include "filesys/cache.h"
+#include "filesys/directory.h"
 #endif
 
 /* Amount of physical memory, in 4 kB pages. */
@@ -116,6 +117,7 @@ main (void)
   disk_init ();
   buffer_cache_init();
   filesys_init (format_filesys);
+  thread_current()->cur_dir = dir_open_root();
 #endif
 
   printf ("Boot complete.\n");

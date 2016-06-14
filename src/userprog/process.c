@@ -39,6 +39,7 @@ struct pack {
   struct semaphore * sema;
   bool * loaded;
   tid_t parent_tid;
+  struct dir * dir;
 };
 
 static struct list exit_info_list;
@@ -77,6 +78,7 @@ process_execute (const char *argv)
   my_pack.sema = &child_load_sema;
   my_pack.argv = argv_copy;
   my_pack.loaded = &loaded;
+  my_pack.dir = thread_current()->cur_dir;
   my_pack.parent_tid = thread_current()->tid;
   tid = thread_create (file_name, PRI_DEFAULT, start_process, &my_pack);
   if (tid == TID_ERROR)
@@ -142,6 +144,7 @@ start_process (void * aux)
  
   palloc_free_page(argv);
 
+  thread_current()->cur_dir = dir_reopen(my_pack->dir);
   struct relationship_info * new_info = malloc(100);
   new_info->parent_tid = my_pack->parent_tid;
   new_info->child_tid = thread_current()->tid;
