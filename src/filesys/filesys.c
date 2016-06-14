@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include "threads/thread.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
@@ -102,4 +103,46 @@ do_format (void)
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
+}
+
+bool traverse_path(char * path, disk_sector_t * sector) {
+  char * token, save_ptr;
+  struct inode * inode;
+  struct dir * cur;
+
+  if (strlen(path) == 0)
+    return false;
+
+  if (path[0] == '/')
+    cur = dir_open_root(); // Absolute path
+  else
+    cur = dir_reopen(thread_current()->cur_dir); // Relative path
+
+  for (token = strtok_r (path, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
+    if (!dir_lookup(cur, token, &inode)) {
+      dir_close(cur);
+      return false;
+    }
+    else {
+      dir_close(cur);
+      if (inode->data.is_dir)
+        cur = dir_open(inode);
+      else {
+        token = strtok_r (NULL, "/", &save_ptr);
+        if (token != NULL) {
+          inode_close(inode);
+          return false;
+        }
+        else {
+          *sector = inode->sector;
+          inode_close(inode);
+          return true;
+        }
+        break;
+      }
+    }
+  }
+  * sector = dir_get_inode(cur)->sector;
+  dir_close(cur);
+  return true;
 }
