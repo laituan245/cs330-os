@@ -121,6 +121,8 @@ bool traverse_path(char * path, disk_sector_t * sector, char ** name, int action
     cur = dir_open_root(); // Absolute path
   else
     cur = dir_reopen(thread_current()->cur_dir); // Relative path
+  if (cur == NULL)
+    return false;
 
   path_copy  = palloc_get_page (0);
   if (path_copy == NULL)
@@ -130,7 +132,22 @@ bool traverse_path(char * path, disk_sector_t * sector, char ** name, int action
   saved = path_copy;
   for (token = strtok_r (path_copy, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
     saved = token;
-    if (!dir_lookup(cur, token, &inode)) {
+    if (strcmp(token, "..") == 0) {
+      struct inode * tmp_inode = inode_open(dir_get_inode(cur)->data.parent);
+      struct dir * parent_dir = dir_open(tmp_inode);
+      dir_close(cur);
+      cur = parent_dir;
+      if (cur == NULL)
+        return false;
+    }
+    else if (strcmp(token, ".") == 0) {
+      struct dir * cur_dir = dir_reopen(cur);
+      dir_close(cur);
+      cur = cur_dir;
+      if (cur == NULL)
+        return false;
+    }
+    else if (!dir_lookup(cur, token, &inode)) {
       if (action_type == 0) {
         dir_close(cur);
         palloc_free_page(path_copy);
@@ -166,8 +183,11 @@ bool traverse_path(char * path, disk_sector_t * sector, char ** name, int action
     }
     else {
       dir_close(cur);
-      if (inode->data.is_dir)
+      if (inode->data.is_dir) {
         cur = dir_open(inode);
+        if (cur == NULL)
+          return false;
+      }
       else {
         token = strtok_r (NULL, "/", &save_ptr);
         if (token != NULL) {
