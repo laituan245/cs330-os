@@ -598,6 +598,42 @@ bool mkdir(void * esp) {
    return rs;
 }
 
+bool chdir(void * esp) {
+  int argc = 1;
+
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  char * dir  = * (char * *) (esp + 4);
+
+  if (!is_valid(dir))
+    terminate_process();
+
+  sema_down(&filesys_sema);
+  disk_sector_t sector;
+  if (!traverse_path(dir, &sector, NULL, 0, NULL)) {
+    sema_up(&filesys_sema);
+    return false;
+  }
+  bool rs = false;
+  struct list_elem * e;
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
+    if (tmp_info->dir_ptr != NULL && dir_get_inode(tmp_info->dir_ptr)->sector == sector) {
+      thread_current()->cur_dir = dir_reopen(tmp_info->dir_ptr);
+      rs = true;
+      break;
+    }
+  }
+  if (!rs) {
+    struct inode * inode = inode_open(sector);
+    thread_current()->cur_dir = dir_open(inode);
+    rs = true;
+  }
+  sema_up(&filesys_sema);
+  return rs;
+}
+
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
@@ -646,6 +682,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       close(f->esp);
       break;
     case SYS_CHDIR:                  /* Change the current directory. */
+      f->eax = chdir(f->esp);
       break;
     case SYS_MKDIR:                  /* Create a directory. */
       f->eax = mkdir(f->esp);
