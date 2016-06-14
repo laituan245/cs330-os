@@ -507,7 +507,53 @@ int open(void * esp) {
   return new_fd;
 }
 
+bool isdir(void * esp) {
+  int argc = 1;
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
 
+  int fd = * (int *) (esp + 4);
+
+  sema_down(&filesys_sema);
+  bool result;
+  struct list_elem * e;
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      if (tmp_info->file_ptr != NULL)
+        result = false;
+      else
+        result = true;
+    }
+  }
+  sema_up(&filesys_sema);
+
+  return result;
+}
+
+int inumber(void * esp) {
+  int argc = 1;
+  if (!are_args_locations_valid(esp, argc))
+    terminate_process();
+
+  int fd = * (int *) (esp + 4);
+
+  sema_down(&filesys_sema);
+  int result;
+  struct list_elem * e;
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      if (tmp_info->dir_ptr)
+        result = dir_get_inode(tmp_info->dir_ptr)->sector;
+      else
+        result = file_get_inode(tmp_info->file_ptr)->sector;
+    }
+  }
+  sema_up(&filesys_sema);
+
+  return result;
+}
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -555,6 +601,18 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
     case SYS_CLOSE:                  /* Close a file. */
       close(f->esp);
+      break;
+    case SYS_CHDIR:                  /* Change the current directory. */
+      break;
+    case SYS_MKDIR:                  /* Create a directory. */
+      break;
+    case SYS_READDIR:                /* Reads a directory entry. */
+      break;
+    case SYS_ISDIR:                  /* Tests if a fd represents a directory. */
+      f->eax = isdir(f->esp);
+      break;
+    case SYS_INUMBER:                /* Returns the inode number for a fd. */
+      f->eax = inumber(f->esp);
       break;
     default:
       terminate_process();
