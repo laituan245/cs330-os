@@ -196,6 +196,11 @@ bool traverse_path(char * path, disk_sector_t * sector, char ** name, int action
           return false;
         }
         else {
+          if (action_type > 0) {
+            inode_close(inode);
+            palloc_free_page(path_copy);
+            return false;
+          }
           *sector = inode->sector;
           inode_close(inode);
           if (name != NULL) {

@@ -52,6 +52,19 @@ allocate_fd (void)
   return fd;
 }
 
+struct file * get_file (int fd) {
+  struct file * myfile = NULL;
+  struct list_elem * e;
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
+    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
+      myfile = tmp_info -> file_ptr;
+      break;
+    }
+  }
+  return myfile;
+}
+
 void terminate_process() {
   thread_current()->exit_status = -1;
   printf("%s: exit(%d)\n", thread_current()->name, -1);
@@ -122,25 +135,15 @@ int write (void * esp) {
   }
   else  {
     sema_down(&filesys_sema);
-    struct file * myfile = NULL;
-    struct list_elem * e;
-    for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
-      struct open_info * tmp_info = list_entry(e, struct open_info, elem);
-      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-        myfile = tmp_info -> file_ptr;
-        break;
-      }
-    }
-    if (myfile == NULL) {
-      sema_up(&filesys_sema);
+    struct file * myfile = get_file(fd);
+    sema_up(&filesys_sema);
+    if (myfile == NULL)
       terminate_process();
-    }
-    
+
     void * tmp_buffer = malloc(size);
     memcpy(tmp_buffer, buffer,size);
     int result = file_write (myfile, tmp_buffer, size);
     free(tmp_buffer);
-    sema_up(&filesys_sema);
     return result;
   }
 }
@@ -165,22 +168,12 @@ int read (void * esp) {
     return 0;
   else {
     sema_down(&filesys_sema);
-    struct file * myfile = NULL;
-    struct list_elem * e;
-    for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
-      struct open_info * tmp_info = list_entry(e, struct open_info, elem);
-      if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) { 
-        myfile = tmp_info -> file_ptr;
-        break;
-      } 
-    }
-    if (myfile == NULL) {
-      sema_up(&filesys_sema);
+    struct file * myfile = get_file(fd);
+    sema_up(&filesys_sema);
+    if (myfile == NULL)
       return -1;
-    }
     void * tmp_buffer = malloc(size);
     int result = file_read (myfile, tmp_buffer, size);
-    sema_up(&filesys_sema);
     memcpy(buffer, tmp_buffer,size);
     free(tmp_buffer);
     return result;
@@ -195,19 +188,11 @@ void seek(void * esp) {
 
   int fd  = * (int *) (esp + 4);
   unsigned position = * (unsigned *) (esp + 8);
-  sema_down(&filesys_sema);
   unsigned result;
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
-    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-  }
-  file_seek(myfile, position);
+  sema_down(&filesys_sema);
+  struct file * myfile = get_file(fd);
   sema_up(&filesys_sema);
+  file_seek(myfile, position);
 }
 
 unsigned tell(void * esp) {
@@ -218,19 +203,9 @@ unsigned tell(void * esp) {
 
   int fd  = * (int *) (esp + 4);
   sema_down(&filesys_sema);
-  unsigned result;
-  struct file * myfile = NULL;
-  struct list_elem * e;
-  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
-    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
-    if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
-      myfile = tmp_info -> file_ptr;
-      break;
-    }
-  }
-  result = file_tell(myfile);
+  struct file * myfile = get_file(fd);
   sema_up(&filesys_sema);
-  return result;
+  return file_tell(myfile);
 }
 
 void close(void * esp) {
