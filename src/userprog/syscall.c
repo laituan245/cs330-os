@@ -9,6 +9,9 @@
 #include "threads/palloc.h"
 #include "threads/malloc.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "filesys/directory.h"
+#include "filesys/inode.h"
 #include "list.h"
 
 struct file_info {
@@ -366,7 +369,8 @@ bool create(void * esp) {
   
   unsigned initial_size = * (unsigned *) (esp + 8);
   sema_down(&filesys_sema);
-  bool result = filesys_create (file_copy, initial_size);
+  struct dir * root_dir = dir_open_root();
+  bool result = filesys_create (root_dir, file_copy, initial_size, 0);
   sema_up(&filesys_sema);
 
   palloc_free_page(file_copy);

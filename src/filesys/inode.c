@@ -12,16 +12,6 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-/* On-disk inode.
-   Must be exactly DISK_SECTOR_SIZE bytes long. */
-struct inode_disk
-  {
-    disk_sector_t doubly_indirect;
-    off_t length;                       /* File size in bytes. */
-    unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
-  };
-
 /* Returns the number of sectors to allocate for an inode SIZE
    bytes long. */
 static inline size_t
@@ -29,18 +19,6 @@ bytes_to_sectors (off_t size)
 {
   return DIV_ROUND_UP (size, DISK_SECTOR_SIZE);
 }
-
-/* In-memory inode. */
-struct inode 
-  {
-    struct list_elem elem;              /* Element in inode list. */
-    disk_sector_t sector;               /* Sector number of disk location. */
-    int open_cnt;                       /* Number of openers. */
-    bool removed;                       /* True if deleted, false otherwise. */
-    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
-    struct inode_disk data;             /* Inode content. */
-    struct semaphore file_growth_sema;
-  };
 
 /* Returns the disk sector that contains byte offset POS within
    INODE.
@@ -78,7 +56,7 @@ inode_init (void)
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (disk_sector_t sector, off_t length)
+inode_create (disk_sector_t sector, off_t length, int is_dir)
 {
   uint32_t i, j;
   disk_sector_t tmp, indirect;
@@ -97,6 +75,7 @@ inode_create (disk_sector_t sector, off_t length)
     {
       size_t sectors = bytes_to_sectors (length);
       disk_inode->length = length;
+      disk_inode->is_dir = is_dir;
       disk_inode->magic = INODE_MAGIC;
       if (free_map_allocate(1, &disk_inode->doubly_indirect)) {
         for (i = 0; i < sectors; i++) {

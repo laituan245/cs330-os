@@ -110,7 +110,8 @@ fsutil_put (char **argv)
     PANIC ("%s: invalid file size %d", file_name, size);
   
   /* Create destination file. */
-  if (!filesys_create (file_name, size))
+  struct dir * root_dir = dir_open_root();
+  if (!filesys_create (root_dir, file_name, size, 0))
     PANIC ("%s: create failed", file_name);
   dst = filesys_open (file_name);
   if (dst == NULL)
