@@ -52,7 +52,6 @@ allocate_fd (void)
   return fd;
 }
 
-
 void terminate_process() {
   thread_current()->exit_status = -1;
   printf("%s: exit(%d)\n", thread_current()->name, -1);
@@ -384,21 +383,62 @@ bool remove(void * esp) {
   if (!are_args_locations_valid(esp, argc))
     terminate_process();
 
-  char * file  = * (char * *) (esp + 4);
+  char * path  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(path))
     terminate_process();
 
-  char * file_copy  = palloc_get_page (0);
-  if (file_copy == NULL)
-    return false;
-  strlcpy (file_copy, file, PGSIZE);
-
   sema_down(&filesys_sema);
-  bool result = filesys_remove (file_copy);
+  char * name;
+  disk_sector_t sector;
+  if (!traverse_path(path, &sector, &name)) {
+    sema_up(&filesys_sema);
+    return false;
+  }
+  bool result = false;
+  struct inode * cur_inode = NULL, * parent_inode;
+  struct dir * cur_dir, * parent_dir;
+  struct list_elem * e;
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+     struct open_info * tmp_info = list_entry(e, struct open_info, elem);
+     if (tmp_info->file_ptr != NULL && file_get_inode(tmp_info->file_ptr)->sector == sector) {
+       cur_inode = inode_reopen(file_get_inode(tmp_info->file_ptr));
+       break;
+     }
+     if (tmp_info->dir_ptr != NULL && dir_get_inode(tmp_info->dir_ptr)->sector == sector) {
+       cur_inode = inode_reopen(dir_get_inode(tmp_info->dir_ptr));
+       break;
+     }
+  }
+  if (cur_inode == NULL)
+    cur_inode = inode_open(sector);
+  parent_inode = inode_open(cur_inode->data.parent);
+  parent_dir = dir_open(parent_inode);
+
+  if (cur_inode->data.is_dir) {
+    cur_dir = dir_open(cur_inode);
+    char tmp_buffer[20];
+    if (dir_readdir (cur_dir, tmp_buffer)) {
+      result = false;
+      dir_close(cur_dir);
+    }
+    else {
+      result = dir_remove (parent_dir, name, false);
+      inode_remove(cur_inode);
+      dir_close(cur_dir);
+    }
+  }
+  else {
+    result = dir_remove (parent_dir, name, false);
+    if (result)
+      inode_remove(cur_inode);
+    inode_close(cur_inode);
+  }
+
+  dir_close(parent_dir);
+  palloc_free_page(name);
   sema_up(&filesys_sema);
 
-  palloc_free_page(file_copy);
   return result;
 }
 
@@ -415,7 +455,7 @@ int open(void * esp) {
 
   sema_down(&filesys_sema);
   disk_sector_t sector;
-  if (!traverse_path(path, &sector)) {
+  if (!traverse_path(path, &sector, NULL)) {
     sema_up(&filesys_sema);
     return -1;
   }
