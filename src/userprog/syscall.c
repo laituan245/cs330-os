@@ -66,7 +66,7 @@ void terminate_process() {
       if (tmp_info->tid == thread_current()->tid) {
         list_remove(&tmp_info->elem);
         file_close(tmp_info->file_ptr);   
-        tmp_info->file_ptr = NULL;
+        dir_close(tmp_info->dir_ptr);
         free(tmp_info);
         freedsth = true;
         break;
@@ -325,7 +325,7 @@ void exit (void * esp) {
       if (tmp_info->tid == thread_current()->tid) {
         list_remove(&tmp_info->elem);
         file_close(tmp_info->file_ptr);
-        tmp_info->file_ptr = NULL;
+        dir_close(tmp_info->dir_ptr);
         free(tmp_info);
         freedsth = true;
         break;
@@ -455,7 +455,8 @@ int open(void * esp) {
 
   sema_down(&filesys_sema);
   disk_sector_t sector;
-  if (!traverse_path(path, &sector, NULL)) {
+  char * name;
+  if (!traverse_path(path, &sector, &name)) {
     sema_up(&filesys_sema);
     return -1;
   }
@@ -463,6 +464,7 @@ int open(void * esp) {
   struct open_info *  new_info = malloc(sizeof (struct open_info));
   if (new_info == NULL) {
     sema_up(&filesys_sema);
+    palloc_free_page(name);
     return -1;
   }
 
@@ -496,7 +498,11 @@ int open(void * esp) {
       new_info->file_ptr = file_open(inode);
   }
   list_push_back(&open_info_list, &new_info->elem);
-
+  if (new_info->file_ptr != NULL) {
+    if (strcmp(name, thread_current()->name) == 0)
+      file_deny_write(new_info->file_ptr);
+  }
+  palloc_free_page(name);
   sema_up(&filesys_sema);
   return new_fd;
 }
