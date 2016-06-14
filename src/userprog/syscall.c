@@ -14,14 +14,15 @@
 #include "filesys/inode.h"
 #include "list.h"
 
-struct file_info {
+struct open_info {
   int fd;
   tid_t tid;
   struct file * file_ptr;
+  struct dir * dir_ptr;
   struct list_elem elem;
 };
 
-static struct list file_info_list;
+static struct list open_info_list;
 
 struct lock fd_lock;
 
@@ -33,7 +34,7 @@ void
 syscall_init (void) 
 {
   lock_init(&fd_lock);
-  list_init(&file_info_list);
+  list_init(&open_info_list);
   sema_init(&filesys_sema, 1);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
@@ -57,12 +58,12 @@ void terminate_process() {
   printf("%s: exit(%d)\n", thread_current()->name, -1);
   sema_down(&filesys_sema);
   struct list_elem * e;
-  struct file_info * tmp_info;
+  struct open_info * tmp_info;
   bool freedsth;
   while(true) {
     freedsth = false;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      tmp_info = list_entry(e, struct file_info, elem);
+    for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+      tmp_info = list_entry(e, struct open_info, elem);
       if (tmp_info->tid == thread_current()->tid) {
         list_remove(&tmp_info->elem);
         file_close(tmp_info->file_ptr);   
@@ -124,8 +125,8 @@ int write (void * esp) {
     sema_down(&filesys_sema);
     struct file * myfile = NULL;
     struct list_elem * e;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+      struct open_info * tmp_info = list_entry(e, struct open_info, elem);
       if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
         myfile = tmp_info -> file_ptr;
         break;
@@ -167,8 +168,8 @@ int read (void * esp) {
     sema_down(&filesys_sema);
     struct file * myfile = NULL;
     struct list_elem * e;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+    for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+      struct open_info * tmp_info = list_entry(e, struct open_info, elem);
       if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) { 
         myfile = tmp_info -> file_ptr;
         break;
@@ -199,8 +200,8 @@ void seek(void * esp) {
   unsigned result;
   struct file * myfile = NULL;
   struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
     if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
       myfile = tmp_info -> file_ptr;
       break;
@@ -221,8 +222,8 @@ unsigned tell(void * esp) {
   unsigned result;
   struct file * myfile = NULL;
   struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
     if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
       myfile = tmp_info -> file_ptr;
       break;
@@ -243,8 +244,8 @@ void close(void * esp) {
   sema_down(&filesys_sema);
   struct file * myfile = NULL;
   struct list_elem * e;
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
     if (tmp_info->fd == fd && tmp_info->tid == thread_current()->tid) {
       myfile = tmp_info -> file_ptr;
       list_remove(&tmp_info->elem);
@@ -287,8 +288,8 @@ int filesize (void * esp) {
   struct file * myfile = NULL;
   struct list_elem * e;
   
-  for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-    struct file_info * tmp_info = list_entry(e, struct file_info, elem);
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
     
     if (tmp_info->fd == fd) {
       myfile = tmp_info -> file_ptr;
@@ -316,12 +317,12 @@ void exit (void * esp) {
   printf("%s: exit(%d)\n", thread_current()->name, status);
   sema_down(&filesys_sema);  
   struct list_elem * e;
-  struct file_info * tmp_info;
+  struct open_info * tmp_info;
   bool freedsth;
   while(true) {
     freedsth = false;
-    for (e = list_begin(&file_info_list); e != list_end(&file_info_list); e = list_next(e)) {
-      tmp_info = list_entry(e, struct file_info, elem);
+    for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+      tmp_info = list_entry(e, struct open_info, elem);
       if (tmp_info->tid == thread_current()->tid) {
         list_remove(&tmp_info->elem);
         file_close(tmp_info->file_ptr);
@@ -407,39 +408,56 @@ int open(void * esp) {
   if (!are_args_locations_valid(esp, argc))
     terminate_process();
 
-  char * file  = * (char * *) (esp + 4);
+  char * path  = * (char * *) (esp + 4);
 
-  if (!is_valid(file))
+  if (!is_valid(path))
     terminate_process();
 
-  char * file_copy  = palloc_get_page (0);
-  if (file_copy == NULL)
-    return -1;
-  strlcpy (file_copy, file, PGSIZE);
-
   sema_down(&filesys_sema);
-  struct file * file_ptr = filesys_open (file_copy);
-  if (file_ptr == NULL) {
+  disk_sector_t sector;
+  if (!traverse_path(path, &sector)) {
     sema_up(&filesys_sema);
     return -1;
   }
-  int new_fd = allocate_fd();
-  struct file_info tmp_info;
-  struct file_info *  new_info = malloc(sizeof (tmp_info));
+
+  struct open_info *  new_info = malloc(sizeof (struct open_info));
   if (new_info == NULL) {
-    file_close(file_ptr);
     sema_up(&filesys_sema);
     return -1;
   }
+
+  int new_fd = allocate_fd();
   new_info->fd = new_fd;
-  new_info->file_ptr = file_ptr;
+  new_info->file_ptr = NULL;
+  new_info->dir_ptr = NULL;
   new_info->tid = thread_current()->tid;
-  list_push_back(&file_info_list, &new_info->elem);
+  bool reopened = false;
+
+  struct list_elem * e;
+  for (e = list_begin(&open_info_list); e != list_end(&open_info_list); e = list_next(e)) {
+    struct open_info * tmp_info = list_entry(e, struct open_info, elem);
+    if (tmp_info->file_ptr != NULL && file_get_inode(tmp_info->file_ptr)->sector == sector) {
+      new_info->file_ptr = file_reopen(tmp_info->file_ptr);
+      reopened = true;
+      break;
+    }
+    if (tmp_info->dir_ptr != NULL && dir_get_inode(tmp_info->dir_ptr)->sector == sector) {
+      new_info->dir_ptr = dir_reopen(tmp_info->dir_ptr);
+      reopened = true;
+      break;
+    }
+  }
+
+  if (!reopened) {
+    struct inode * inode = inode_open(sector);
+    if (inode->data.is_dir)
+      new_info->dir_ptr = dir_open(inode);
+    else
+      new_info->file_ptr = file_open(inode);
+  }
+  list_push_back(&open_info_list, &new_info->elem);
 
   sema_up(&filesys_sema);
-  if (strcmp(file_copy, thread_current()->name) == 0)
-    file_deny_write(file_ptr);
-  palloc_free_page(file_copy);
   return new_fd;
 }
 

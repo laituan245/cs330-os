@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
@@ -106,7 +107,7 @@ do_format (void)
 }
 
 bool traverse_path(char * path, disk_sector_t * sector) {
-  char * token, save_ptr;
+  char * token, *path_copy, save_ptr;
   struct inode * inode;
   struct dir * cur;
 
@@ -118,9 +119,15 @@ bool traverse_path(char * path, disk_sector_t * sector) {
   else
     cur = dir_reopen(thread_current()->cur_dir); // Relative path
 
-  for (token = strtok_r (path, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
+  path_copy  = palloc_get_page (0);
+  if (path_copy == NULL)
+    return false;
+  strlcpy (path_copy, path, PGSIZE);
+
+  for (token = strtok_r (path_copy, "/", &save_ptr); token != NULL; token = strtok_r (NULL, "/", &save_ptr)) {
     if (!dir_lookup(cur, token, &inode)) {
       dir_close(cur);
+      palloc_free_page(path_copy);
       return false;
     }
     else {
@@ -131,11 +138,13 @@ bool traverse_path(char * path, disk_sector_t * sector) {
         token = strtok_r (NULL, "/", &save_ptr);
         if (token != NULL) {
           inode_close(inode);
+          palloc_free_page(path_copy);
           return false;
         }
         else {
           *sector = inode->sector;
           inode_close(inode);
+          palloc_free_page(path_copy);
           return true;
         }
         break;
@@ -144,5 +153,6 @@ bool traverse_path(char * path, disk_sector_t * sector) {
   }
   * sector = dir_get_inode(cur)->sector;
   dir_close(cur);
+  palloc_free_page(path_copy);
   return true;
 }
